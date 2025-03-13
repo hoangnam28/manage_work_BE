@@ -79,7 +79,6 @@ router.post('/edit-row', async (req, res) => {
             return res.status(404).json({ message: 'Dòng không tồn tại' });
         }
         const old_content = result.rows[0].CONTENT;
-
         await connection.execute(
             `INSERT INTO edit_history (document_id, row_id, edited_by, old_content, new_content) VALUES (:document_id, :row_id, :edited_by, :old_content, :new_content)`,
             { document_id, row_id, edited_by, old_content, new_content },

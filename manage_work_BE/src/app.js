@@ -3,7 +3,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const database = require('./config/database');
 const authRoutes = require('./routes/auth');  
-const reviewRoutes = require('./routes/review'); 
+const reviewRoutes = require('./routes/history'); 
 const documentationRoutes = require('./routes/document');
 const path = require('path');
 const fs = require('fs');
@@ -52,7 +52,6 @@ process.on('SIGINT', async () => {
     await database.closePool();
     process.exit(0);
   } catch (err) {
-    console.error('Error during shutdown:', err);
     process.exit(1);
   }
 });

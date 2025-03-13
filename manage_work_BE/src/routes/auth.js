@@ -3,45 +3,86 @@ const router = express.Router();
 const oracledb = require('oracledb');
 const database = require('../config/database');
 require('dotenv').config();
+const jwt = require('jsonwebtoken');
 
 router.post('/login', async (req, res) => {
-    const { company_id, password } = req.body;
-
-    if (!company_id || !password) {
-        return res.status(400).json({ message: "Vui lòng nhập ID công ty và mật khẩu" });
-    }
-
+    const { company_id, password_hash } = req.body;
     let connection;
+
     try {
         connection = await database.getConnection();
+        
+        // Log request data
+        console.log('Login attempt:', { company_id, password_hash });
 
+        // Sửa lại query để tìm user và so sánh không phân biệt hoa thường
         const result = await connection.execute(
-            `SELECT user_id, username, avatar FROM users WHERE company_id = :company_id AND password_hash = :password_hash`,
-            [company_id, password],
+            `SELECT * FROM users WHERE UPPER(COMPANY_ID) = UPPER(:company_id)`,
+            { company_id: company_id },
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
+        // Log kết quả query
+        console.log('Query result:', result.rows);
+
         if (result.rows.length === 0) {
-            return res.status(401).json({ message: "ID công ty hoặc mật khẩu không đúng" });
+            return res.status(401).json({ message: 'ID của bạn nhập không tồn tại' });
         }
 
         const user = result.rows[0];
-
-        res.json({ 
-            user: { 
-                user_id: user.USER_ID, 
-                username: user.USERNAME, 
-                company_id,
-                avatar: user.AVATAR 
-            } 
+        
+        // Log để debug chi tiết
+        console.log('Found user:', {
+            company_id: user.COMPANY_ID,
+            stored_password: user.PASSWORD_HASH,
+            input_password: password_hash,
+            password_match: password_hash.trim() === user.PASSWORD_HASH.trim()
         });
 
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: "Lỗi server" });
+        // So sánh mật khẩu sau khi đã trim() để loại bỏ khoảng trắng
+        if (password_hash.trim() !== user.PASSWORD_HASH.trim()) {
+            return res.status(401).json({ 
+                message: 'Mật khẩu không đúng',
+                debug: {
+                    inputPassword: password_hash,
+                    storedPassword: user.PASSWORD_HASH,
+                    passwordLength: {
+                        input: password_hash.length,
+                        stored: user.PASSWORD_HASH.length
+                    }
+                }
+            });
+        }
+
+        const token = jwt.sign(
+            { 
+                username: user.USERNAME,
+                userId: user.USER_ID,
+                company_id: user.COMPANY_ID
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            message: 'Đăng nhập thành công',
+            accessToken: token,
+            user: {
+                username: user.USERNAME,
+                userId: user.USER_ID,
+                company_id: user.COMPANY_ID
+            }
+        });
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ message: 'Lỗi server' });
     } finally {
         if (connection) {
-            await connection.close();
+            try {
+                await connection.close();
+            } catch (err) {
+                console.error('Error closing connection:', err);
+            }
         }
     }
 });
@@ -73,6 +114,38 @@ router.get('/avatar/:user_id', async (req, res) => {
             await connection.close();
         }
     }
+});
+
+// Middleware xác thực token
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ message: 'Không tìm thấy token' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ message: 'Token không hợp lệ' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+// API lấy thông tin user từ token
+router.get('/profile', authenticateToken, async (req, res) => {
+  try {
+    // req.user đã được decode từ token trong middleware
+    res.json({
+      username: req.user.username,
+      // Thêm các thông tin khác nếu cần
+    });
+  } catch (error) {
+    console.error('Error getting user profile:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
 });
 
 module.exports = router;
