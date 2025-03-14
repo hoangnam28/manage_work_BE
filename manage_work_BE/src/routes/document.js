@@ -27,7 +27,6 @@ router.post('/add', async (req, res) => {
             `SELECT seq_document_columns.NEXTVAL as next_stt FROM DUAL`
         );
         const stt = seqResult.rows[0][0];
-
         const result = await connection.execute(
             `INSERT INTO document_columns (
                 column_id, stt, ma, khach_hang, ma_tai_lieu
@@ -42,7 +41,6 @@ router.post('/add', async (req, res) => {
             },
             { autoCommit: true }
         );
-        
         res.json({ 
             message: 'Thêm dữ liệu thành công', 
             id: result.lastRowid,
@@ -281,22 +279,14 @@ router.get('/get-images/:column_id/:field', async (req, res) => {
 
   try {
     connection = await database.getConnection();
-    
-    
     const result = await connection.execute(
       `SELECT file_path FROM images WHERE column_id = :column_id AND field_name = :field`,
       { column_id, field }
     );
-
-    
-    // Đảm bảo result.rows là một mảng
-    const images = result.rows ? result.rows.map(row => row[0]) : [];
-    
-    
+    const images = result.rows ? result.rows.map(row => row[0]) : [];    
     res.json({ images });
 
   } catch (err) {
-    console.error('Error in get-images:', err);
     res.status(500).json({ message: 'Lỗi server', error: err.message });
   } finally {
     if (connection) await connection.close();
@@ -321,7 +311,6 @@ router.get('/list', async (req, res) => {
         // Xử lý dữ liệu GHI_CHU trước khi trả về
         const processedRows = result.rows.map(row => {
             const processedRow = { ...row };
-            
             // Xử lý trường GHI_CHU
             if (processedRow.GHI_CHU) {
                 if (typeof processedRow.GHI_CHU === 'string') {
@@ -331,7 +320,6 @@ router.get('/list', async (req, res) => {
                     }
                 }
             }
-            
             return processedRow;
         });
         
@@ -370,7 +358,6 @@ router.delete('/delete-image/:column_id/:field/:filename', async (req, res) => {
     if (fs.existsSync(filePath)) {
       fs.unlinkSync(filePath);
     }
-
     // Xóa record từ database
     connection = await database.getConnection();
     await connection.execute(
@@ -378,7 +365,6 @@ router.delete('/delete-image/:column_id/:field/:filename', async (req, res) => {
       { column_id, field, filename }
     );
     await connection.commit();
-
     res.json({ message: 'Xóa hình ảnh thành công' });
   } catch (err) {
     res.status(500).json({ message: 'Lỗi khi xóa hình ảnh', error: err.message });
@@ -436,7 +422,6 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
     
     res.json(result.rows);
   } catch (err) {
-    console.error('Error fetching edit history:', err);
     res.status(500).json({ 
       message: 'Lỗi khi lấy lịch sử chỉnh sửa',
       error: err.message 
