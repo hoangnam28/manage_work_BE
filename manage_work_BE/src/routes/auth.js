@@ -12,21 +12,45 @@ router.post('/login', async (req, res) => {
     try {
         connection = await database.getConnection();
         
-        // Log request data
-        console.log('Login attempt:', { company_id, password_hash });
+        // Log chi tiết request
+        console.log('Login attempt:', { 
+            company_id, 
+            password_hash,
+            company_id_length: company_id.length,
+            company_id_type: typeof company_id
+        });
 
-        // Sửa lại query để tìm user và so sánh không phân biệt hoa thường
+        // Thêm query kiểm tra trước
+        const checkQuery = await connection.execute(
+            `SELECT COUNT(*) as count FROM users`,
+            [],
+            { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        console.log('Total users in database:', checkQuery.rows[0].COUNT);
+
+        // Query tìm user với điều kiện chính xác hơn
         const result = await connection.execute(
-            `SELECT * FROM users WHERE UPPER(COMPANY_ID) = UPPER(:company_id)`,
+            `SELECT * FROM users WHERE TRIM(COMPANY_ID) = TRIM(:company_id)`,
             { company_id: company_id },
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
-        // Log kết quả query
-        console.log('Query result:', result.rows);
-
         if (result.rows.length === 0) {
-            return res.status(401).json({ message: 'ID của bạn nhập không tồn tại' });
+            // Log tất cả company_id trong DB để debug
+            const allUsers = await connection.execute(
+                `SELECT COMPANY_ID FROM users`,
+                [],
+                { outFormat: oracledb.OUT_FORMAT_OBJECT }
+            );
+            console.log('All company IDs in DB:', allUsers.rows.map(r => r.COMPANY_ID));
+            
+            return res.status(401).json({ 
+                message: 'ID của bạn nhập không tồn tại',
+                debug: {
+                    attempted_company_id: company_id,
+                    company_id_length: company_id.length
+                }
+            });
         }
 
         const user = result.rows[0];

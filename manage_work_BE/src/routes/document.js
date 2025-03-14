@@ -72,7 +72,21 @@ router.put('/update/:column_id', async (req, res) => {
   try {
     connection = await database.getConnection();
     
-    // Lấy dữ liệu cũ trước khi cập nhật
+    // Xử lý định dạng ngày tháng trước khi update
+    const formattedData = {
+      ...data,
+      // Chỉ lấy phần ngày tháng (YYYY-MM-DD)
+      ngay_thiet_ke: data.ngay_thiet_ke ? data.ngay_thiet_ke.split('T')[0] : null,
+      ngay: data.ngay ? data.ngay.split('T')[0] : null
+    };
+
+    // Log để debug
+    console.log('Formatted dates:', {
+      ngay_thiet_ke: formattedData.ngay_thiet_ke,
+      ngay: formattedData.ngay
+    });
+
+    // Lấy dữ liệu cũ
     const oldDataResult = await connection.execute(
       `SELECT * FROM document_columns WHERE column_id = :column_id`,
       { column_id },
@@ -85,7 +99,7 @@ router.put('/update/:column_id', async (req, res) => {
 
     const oldData = oldDataResult.rows[0];
 
-    // Cập nhật dữ liệu mới
+    // Cập nhật với định dạng ngày đơn giản hơn
     await connection.execute(
       `UPDATE document_columns SET 
         ma = :ma,
@@ -93,32 +107,38 @@ router.put('/update/:column_id', async (req, res) => {
         ma_tai_lieu = :ma_tai_lieu,
         rev = :rev,
         phu_trach_thiet_ke = :phu_trach_thiet_ke,
-        ngay_thiet_ke = :ngay_thiet_ke,
+        ngay_thiet_ke = TO_DATE(:ngay_thiet_ke, 'YYYY-MM-DD'),
         cong_venh = :cong_venh,
         phu_trach_review = :phu_trach_review,
-        ngay = :ngay,
+        ngay = TO_DATE(:ngay, 'YYYY-MM-DD'),
         v_cut = :v_cut,
         xu_ly_be_mat = :xu_ly_be_mat,
         ghi_chu = :ghi_chu
       WHERE column_id = :column_id`,
-      { ...data, column_id }
+      { 
+        ...formattedData,
+        column_id,
+        // Truyền null nếu không có giá trị
+        ngay_thiet_ke: formattedData.ngay_thiet_ke || null,
+        ngay: formattedData.ngay || null
+      }
     );
 
-    // Lưu lịch sử cho các trường thay đổi
+    // Lưu lịch sử chỉnh sửa
     for (const [field, newValue] of Object.entries(data)) {
-      if (field !== 'edited_by') { // Bỏ qua trường edited_by
+      if (field !== 'edited_by') {
         const oldValue = oldData[field.toUpperCase()];
         
-        // Chỉ lưu lịch sử nếu giá trị thay đổi
-        if (oldValue !== newValue) {
-          console.log('Saving history for:', {
-            field: field.toUpperCase(),
-            oldValue,
-            newValue,
-            column_id,
-            edited_by
-          });
+        // Định dạng lại giá trị ngày tháng cho lịch sử
+        let formattedOldValue = oldValue;
+        let formattedNewValue = newValue;
 
+        if (field === 'ngay_thiet_ke' || field === 'ngay') {
+          formattedOldValue = oldValue ? new Date(oldValue).toISOString().split('T')[0] : null;
+          formattedNewValue = newValue ? new Date(newValue).toISOString().split('T')[0] : null;
+        }
+
+        if (formattedOldValue !== formattedNewValue) {
           await connection.execute(
             `INSERT INTO edit_history (
               history_id,
@@ -140,8 +160,8 @@ router.put('/update/:column_id', async (req, res) => {
             {
               column_id,
               field_name: field.toUpperCase(),
-              old_value: oldValue?.toString() || '',
-              new_value: newValue?.toString() || '',
+              old_value: formattedOldValue?.toString() || '',
+              new_value: formattedNewValue?.toString() || '',
               edited_by
             }
           );
@@ -241,7 +261,6 @@ router.post('/upload-images/:column_id/:field', upload.array('images', 10), asyn
     );
     
     const images = newImagesResult.rows.map(row => row[0]);
-    console.log('Images after upload:', images);
 
     res.json({ 
       message: 'Tải lên hình ảnh thành công',
@@ -395,9 +414,6 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
   try {
     connection = await database.getConnection();
     
-    // Log để debug
-    console.log('Fetching history for:', { column_id, field });
-    
     const result = await connection.execute(
       `SELECT 
         h.history_id,
@@ -417,9 +433,6 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
       },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-
-    // Log kết quả để debug
-    console.log('Query result:', result.rows);
     
     res.json(result.rows);
   } catch (err) {
