@@ -3,7 +3,6 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const database = require('./config/database');
 const authRoutes = require('./routes/auth');  
-const reviewRoutes = require('./routes/history'); 
 const documentationRoutes = require('./routes/document');
 const path = require('path');
 const fs = require('fs');
@@ -34,7 +33,7 @@ database.initialize()
 
 app.use('/api/auth', authRoutes);
 
-app.use('/api/review', reviewRoutes);
+
 
 app.use('/api/document', documentationRoutes);
 

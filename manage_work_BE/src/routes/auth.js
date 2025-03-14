@@ -54,16 +54,6 @@ router.post('/login', async (req, res) => {
         }
 
         const user = result.rows[0];
-        
-        // Log để debug chi tiết
-        console.log('Found user:', {
-            company_id: user.COMPANY_ID,
-            stored_password: user.PASSWORD_HASH,
-            input_password: password_hash,
-            password_match: password_hash.trim() === user.PASSWORD_HASH.trim()
-        });
-
-        // So sánh mật khẩu sau khi đã trim() để loại bỏ khoảng trắng
         if (password_hash.trim() !== user.PASSWORD_HASH.trim()) {
             return res.status(401).json({ 
                 message: 'Mật khẩu không đúng',
