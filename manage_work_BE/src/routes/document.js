@@ -16,7 +16,6 @@ if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Thêm dữ liệu vào bảng document_columns
 router.post('/add', async (req, res) => {
     const { ma, khach_hang, ma_tai_lieu } = req.body;
     let connection;
@@ -69,22 +68,11 @@ router.put('/update/:column_id', async (req, res) => {
 
   try {
     connection = await database.getConnection();
-    
-    // Xử lý định dạng ngày tháng trước khi update
     const formattedData = {
       ...data,
-      // Chỉ lấy phần ngày tháng (YYYY-MM-DD)
       ngay_thiet_ke: data.ngay_thiet_ke ? data.ngay_thiet_ke.split('T')[0] : null,
       ngay: data.ngay ? data.ngay.split('T')[0] : null
     };
-
-    // Log để debug
-    console.log('Formatted dates:', {
-      ngay_thiet_ke: formattedData.ngay_thiet_ke,
-      ngay: formattedData.ngay
-    });
-
-    // Lấy dữ liệu cũ
     const oldDataResult = await connection.execute(
       `SELECT * FROM document_columns WHERE column_id = :column_id`,
       { column_id },
@@ -96,8 +84,6 @@ router.put('/update/:column_id', async (req, res) => {
     }
 
     const oldData = oldDataResult.rows[0];
-
-    // Cập nhật với định dạng ngày đơn giản hơn
     await connection.execute(
       `UPDATE document_columns SET 
         ma = :ma,
@@ -126,8 +112,7 @@ router.put('/update/:column_id', async (req, res) => {
     for (const [field, newValue] of Object.entries(data)) {
       if (field !== 'edited_by') {
         const oldValue = oldData[field.toUpperCase()];
-        
-        // Định dạng lại giá trị ngày tháng cho lịch sử
+
         let formattedOldValue = oldValue;
         let formattedNewValue = newValue;
 
@@ -171,7 +156,6 @@ router.put('/update/:column_id', async (req, res) => {
     res.json({ message: 'Cập nhật thành công' });
   } catch (err) {
     await connection.rollback();
-    console.error('Error updating record:', err);
     res.status(500).json({ 
       message: 'Lỗi khi cập nhật',
       error: err.message 
@@ -235,15 +219,13 @@ router.post('/upload-images/:column_id/:field', upload.array('images', 10), asyn
 
   try {
     connection = await database.getConnection();
-
-    // Chèn từng file vào database
     const insertPromises = req.files.map(async (file) => {
       return connection.execute(
         `INSERT INTO images (column_id, file_path, field_name) 
          VALUES (:column_id, :file_path, :field)`,
         { 
           column_id: column_id,
-          file_path: file.filename, // Chỉ lưu tên file
+          file_path: file.filename, 
           field: field
         }
       );

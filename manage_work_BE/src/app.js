@@ -33,17 +33,13 @@ database.initialize()
 
 app.use('/api/auth', authRoutes);
 
-
-
 app.use('/api/document', documentationRoutes);
 
-// Thêm middleware để phục vụ file tĩnh từ thư mục uploads
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
-  console.log('Created uploads directory at:', uploadDir);
 }
 
 process.on('SIGINT', async () => {

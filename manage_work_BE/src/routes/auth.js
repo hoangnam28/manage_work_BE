@@ -11,23 +11,12 @@ router.post('/login', async (req, res) => {
 
     try {
         connection = await database.getConnection();
-        
-        // Log chi tiết request
-        console.log('Login attempt:', { 
-            company_id, 
-            password_hash,
-            company_id_length: company_id.length,
-            company_id_type: typeof company_id
-        });
-
         // Thêm query kiểm tra trước
         const checkQuery = await connection.execute(
             `SELECT COUNT(*) as count FROM users`,
             [],
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
-        console.log('Total users in database:', checkQuery.rows[0].COUNT);
-
         // Query tìm user với điều kiện chính xác hơn
         const result = await connection.execute(
             `SELECT * FROM users WHERE TRIM(COMPANY_ID) = TRIM(:company_id)`,
@@ -154,7 +143,6 @@ router.get('/profile', authenticateToken, async (req, res) => {
     // req.user đã được decode từ token trong middleware
     res.json({
       username: req.user.username,
-      // Thêm các thông tin khác nếu cần
     });
   } catch (error) {
     console.error('Error getting user profile:', error);
