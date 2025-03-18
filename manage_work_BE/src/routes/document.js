@@ -283,7 +283,9 @@ router.get('/list', async (req, res) => {
         const result = await connection.execute(
             `SELECT column_id, stt, ma, khach_hang, ma_tai_lieu, rev, 
             phu_trach_thiet_ke, ngay_thiet_ke, cong_venh, phu_trach_review, 
-            ngay, v_cut, xu_ly_be_mat, ghi_chu
+            ngay, v_cut, xu_ly_be_mat, ghi_chu,
+            is_deleted, deleted_by,
+            TO_CHAR(deleted_at, 'DD/MM/YYYY HH24:MI:SS') as deleted_at
             FROM document_columns 
             ORDER BY stt ASC`,
             {},
@@ -293,7 +295,6 @@ router.get('/list', async (req, res) => {
         // Xử lý dữ liệu GHI_CHU trước khi trả về
         const processedRows = result.rows.map(row => {
             const processedRow = { ...row };
-            // Xử lý trường GHI_CHU
             if (processedRow.GHI_CHU) {
                 if (typeof processedRow.GHI_CHU === 'string') {
                     if (processedRow.GHI_CHU.includes('_events') || 
@@ -408,6 +409,75 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
       message: 'Lỗi khi lấy lịch sử chỉnh sửa',
       error: err.message 
     });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+router.put('/soft-delete/:column_id', async (req, res) => {
+  const { column_id } = req.params;
+  const { username } = req.body;
+  let connection;
+
+  try {
+    connection = await database.getConnection();
+    
+    await connection.execute(
+      `UPDATE document_columns 
+       SET IS_DELETED = 1, 
+           DELETED_BY = :username, 
+           DELETED_AT = CURRENT_TIMESTAMP 
+       WHERE COLUMN_ID = :column_id`,
+      { column_id, username }
+    );
+    
+    await connection.commit();
+    res.json({ message: 'Đánh dấu xóa thành công' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Lỗi khi cập nhật trạng thái xóa' });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+// Thêm route restore
+router.put('/restore/:column_id', async (req, res) => {
+  const { column_id } = req.params;
+  const { username } = req.body;
+  let connection;
+
+  try {
+    connection = await database.getConnection();
+    
+    await connection.execute(
+      `UPDATE document_columns 
+       SET IS_DELETED = 0, 
+           DELETED_BY = NULL, 
+           DELETED_AT = NULL,
+           RESTORED_BY = :username,
+           RESTORED_AT = CURRENT_TIMESTAMP
+       WHERE COLUMN_ID = :column_id`,
+      { column_id, username }
+    );
+    
+    await connection.commit();
+    res.json({ message: 'Khôi phục dữ liệu thành công' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Lỗi khi khôi phục dữ liệu' });
   } finally {
     if (connection) {
       try {
