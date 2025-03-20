@@ -31,7 +31,6 @@ router.post('/login', async (req, res) => {
                 [],
                 { outFormat: oracledb.OUT_FORMAT_OBJECT }
             );
-            console.log('All company IDs in DB:', allUsers.rows.map(r => r.COMPANY_ID));
             
             return res.status(401).json({ 
                 message: 'ID của bạn nhập không tồn tại',
