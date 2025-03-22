@@ -11,18 +11,20 @@ router.post('/login', async (req, res) => {
 
     try {
         connection = await database.getConnection();
-        // Thêm query kiểm tra trước
-        const checkQuery = await connection.execute(
-            `SELECT COUNT(*) as count FROM users`,
-            [],
-            { outFormat: oracledb.OUT_FORMAT_OBJECT }
-        );
-        // Query tìm user với điều kiện chính xác hơn
+        // Log để debug
+        console.log('Login attempt - Company ID:', company_id);
+
         const result = await connection.execute(
             `SELECT * FROM users WHERE TRIM(COMPANY_ID) = TRIM(:company_id)`,
             { company_id: company_id },
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
+
+        if (result.rows.length > 0) {
+            const user = result.rows[0];
+            console.log('Found user:', user);
+            console.log('Company ID from DB:', user.COMPANY_ID);
+        }
 
         if (result.rows.length === 0) {
             // Log tất cả company_id trong DB để debug
@@ -39,7 +41,7 @@ router.post('/login', async (req, res) => {
                     company_id_length: company_id.length
                 }
             });
-        }
+        }   
 
         const user = result.rows[0];
         if (password_hash.trim() !== user.PASSWORD_HASH.trim()) {
@@ -60,7 +62,7 @@ router.post('/login', async (req, res) => {
             { 
                 username: user.USERNAME,
                 userId: user.USER_ID,
-                company_id: user.COMPANY_ID
+                company_id: user.COMPANY_ID.trim()
             },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
@@ -72,7 +74,7 @@ router.post('/login', async (req, res) => {
             user: {
                 username: user.USERNAME,
                 userId: user.USER_ID,
-                company_id: user.COMPANY_ID
+                company_id: user.COMPANY_ID.trim()
             }
         });
     } catch (error) {
@@ -136,16 +138,37 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// API lấy thông tin user từ token
+// Route lấy thông tin profile
 router.get('/profile', authenticateToken, async (req, res) => {
+  let connection;
   try {
-    // req.user đã được decode từ token trong middleware
+    connection = await database.getConnection();
+    const result = await connection.execute(
+      `SELECT username, company_id FROM users WHERE company_id = :company_id`,
+      { company_id: req.user.company_id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy thông tin người dùng' });
+    }
+
+    const user = result.rows[0];
     res.json({
-      username: req.user.username,
+      username: user.USERNAME,
+      company_id: user.COMPANY_ID.trim()
     });
   } catch (error) {
-    console.error('Error getting user profile:', error);
+    console.error('Error fetching profile:', error);
     res.status(500).json({ message: 'Lỗi server' });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
   }
 });
 

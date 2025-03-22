@@ -9,8 +9,6 @@ const fs = require('fs');
 // Trong file config database
 oracledb.fetchAsBuffer = [ oracledb.BLOB ];
 oracledb.autoCommit = true;
-
-// Tạo thư mục uploads nếu chưa tồn tại
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
@@ -21,7 +19,6 @@ router.post('/add', async (req, res) => {
     let connection;
     try {
         connection = await database.getConnection();
-        // Get next sequence value for STT
         const seqResult = await connection.execute(
             `SELECT seq_document_columns.NEXTVAL as next_stt FROM DUAL`
         );
@@ -234,7 +231,6 @@ router.post('/upload-images/:column_id/:field', upload.array('images', 10), asyn
     await Promise.all(insertPromises);
     await connection.commit();
 
-    // Lấy danh sách hình ảnh mới sau khi thêm
     const newImagesResult = await connection.execute(
       `SELECT file_path FROM images WHERE column_id = :column_id AND field_name = :field`,
       { column_id, field }
@@ -246,6 +242,7 @@ router.post('/upload-images/:column_id/:field', upload.array('images', 10), asyn
       message: 'Tải lên hình ảnh thành công',
       images: images
     });
+
 
   } catch (err) {
     res.status(500).json({ message: 'Lỗi server', error: err.message });
@@ -453,7 +450,6 @@ router.put('/soft-delete/:column_id', async (req, res) => {
   }
 });
 
-// Thêm route restore
 router.put('/restore/:column_id', async (req, res) => {
   const { column_id } = req.params;
   const { username } = req.body;
