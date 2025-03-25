@@ -1,4 +1,4 @@
-const AUTHORIZED_COMPANY_IDS = ['017965', '006065', '003524', '008247', '006064'];
+const AUTHORIZED_COMPANY_IDS = ['017965', '006065', '003524', '008247', '006064', '030516'];
 
 const checkEditPermission = (req, res, next) => {
   const user = req.user;

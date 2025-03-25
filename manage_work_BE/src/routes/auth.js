@@ -20,11 +20,11 @@ router.post('/login', async (req, res) => {
             { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
 
-        if (result.rows.length > 0) {
-            const user = result.rows[0];
-            console.log('Found user:', user);
-            console.log('Company ID from DB:', user.COMPANY_ID);
-        }
+        // if (result.rows.length > 0) {
+        //     const user = result.rows[0];
+        //     console.log('Found user:', user);
+        //     console.log('Company ID from DB:', user.COMPANY_ID);
+        // }
 
         if (result.rows.length === 0) {
             // Log tất cả company_id trong DB để debug
