@@ -15,7 +15,7 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 router.post('/add', async (req, res) => {
-    const { ma, khach_hang, ma_tai_lieu } = req.body;
+    const { ma, khach_hang, ma_tai_lieu, created_by } = req.body;
     let connection;
     try {
         connection = await database.getConnection();
@@ -25,18 +25,22 @@ router.post('/add', async (req, res) => {
         const stt = seqResult.rows[0][0];
         const result = await connection.execute(
             `INSERT INTO document_columns (
-                column_id, stt, ma, khach_hang, ma_tai_lieu
+                column_id, stt, ma, khach_hang, ma_tai_lieu,
+                created_by, created_at
             ) VALUES (
-                seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu
+                seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu,
+                :created_by, CURRENT_TIMESTAMP
             )`,
             { 
                 stt,
                 ma, 
                 khach_hang, 
-                ma_tai_lieu
+                ma_tai_lieu,
+                created_by
             },
             { autoCommit: true }
         );
+        
         res.json({ 
             message: 'Thêm dữ liệu thành công', 
             id: result.lastRowid,
@@ -44,11 +48,12 @@ router.post('/add', async (req, res) => {
                 stt,
                 ma,
                 khach_hang,
-                ma_tai_lieu
+                ma_tai_lieu,
+                created_by
             }
         });
     } catch (err) {
-        console.error(err);
+        console.error('Error adding record:', err);
         res.status(500).json({ 
             message: 'Lỗi server', 
             error: err.message 
@@ -65,11 +70,8 @@ router.put('/update/:column_id', async (req, res) => {
 
   try {
     connection = await database.getConnection();
-    const formattedData = {
-      ...data,
-      ngay_thiet_ke: data.ngay_thiet_ke ? data.ngay_thiet_ke.split('T')[0] : null,
-      ngay: data.ngay ? data.ngay.split('T')[0] : null
-    };
+    
+    // Lấy dữ liệu cũ để so sánh
     const oldDataResult = await connection.execute(
       `SELECT * FROM document_columns WHERE column_id = :column_id`,
       { column_id },
@@ -81,27 +83,29 @@ router.put('/update/:column_id', async (req, res) => {
     }
 
     const oldData = oldDataResult.rows[0];
+    
+    // Cập nhật dữ liệu không sử dụng formattedData
     await connection.execute(
       `UPDATE document_columns SET 
         ma = :ma,
         khach_hang = :khach_hang,
         ma_tai_lieu = :ma_tai_lieu,
         rev = :rev,
-        phu_trach_thiet_ke = :phu_trach_thiet_ke,
-        ngay_thiet_ke = TO_DATE(:ngay_thiet_ke, 'YYYY-MM-DD'),
         cong_venh = :cong_venh,
-        phu_trach_review = :phu_trach_review,
-        ngay = TO_DATE(:ngay, 'YYYY-MM-DD'),
         v_cut = :v_cut,
         xu_ly_be_mat = :xu_ly_be_mat,
         ghi_chu = :ghi_chu
       WHERE column_id = :column_id`,
       { 
-        ...formattedData,
-        column_id,
-        // Truyền null nếu không có giá trị
-        ngay_thiet_ke: formattedData.ngay_thiet_ke || null,
-        ngay: formattedData.ngay || null
+        ma: data.ma,
+        khach_hang: data.khach_hang,
+        ma_tai_lieu: data.ma_tai_lieu,
+        rev: data.rev,
+        cong_venh: data.cong_venh,
+        v_cut: data.v_cut,
+        xu_ly_be_mat: data.xu_ly_be_mat,
+        ghi_chu: data.ghi_chu,
+        column_id
       }
     );
 
@@ -112,11 +116,6 @@ router.put('/update/:column_id', async (req, res) => {
 
         let formattedOldValue = oldValue;
         let formattedNewValue = newValue;
-
-        if (field === 'ngay_thiet_ke' || field === 'ngay') {
-          formattedOldValue = oldValue ? new Date(oldValue).toISOString().split('T')[0] : null;
-          formattedNewValue = newValue ? new Date(newValue).toISOString().split('T')[0] : null;
-        }
 
         if (formattedOldValue !== formattedNewValue) {
           await connection.execute(
@@ -152,7 +151,16 @@ router.put('/update/:column_id', async (req, res) => {
     await connection.commit();
     res.json({ message: 'Cập nhật thành công' });
   } catch (err) {
-    await connection.rollback();
+    console.error('Error updating record:', err);
+    
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Error during rollback:', rollbackError);
+      }
+    }
+    
     res.status(500).json({ 
       message: 'Lỗi khi cập nhật',
       error: err.message 
@@ -279,8 +287,9 @@ router.get('/list', async (req, res) => {
         connection = await database.getConnection();
         const result = await connection.execute(
             `SELECT column_id, stt, ma, khach_hang, ma_tai_lieu, rev, 
-            phu_trach_thiet_ke, ngay_thiet_ke, cong_venh, phu_trach_review, 
-            ngay, v_cut, xu_ly_be_mat, ghi_chu,
+            cong_venh, v_cut, xu_ly_be_mat, ghi_chu,
+            created_by, TO_CHAR(created_at, 'DD/MM/YYYY HH24:MI:SS') as created_at,
+            last_edited_by, TO_CHAR(last_edited_at, 'DD/MM/YYYY HH24:MI:SS') as last_edited_at,
             is_deleted, deleted_by,
             TO_CHAR(deleted_at, 'DD/MM/YYYY HH24:MI:SS') as deleted_at
             FROM document_columns 
