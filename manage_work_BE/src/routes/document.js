@@ -286,12 +286,13 @@ router.get('/list', async (req, res) => {
     try {
         connection = await database.getConnection();
         const result = await connection.execute(
-            `SELECT column_id, stt, ma, khach_hang, ma_tai_lieu, rev, 
-            cong_venh, v_cut, xu_ly_be_mat, ghi_chu,
-            created_by, TO_CHAR(created_at, 'DD/MM/YYYY HH24:MI:SS') as created_at,
-            last_edited_by, TO_CHAR(last_edited_at, 'DD/MM/YYYY HH24:MI:SS') as last_edited_at,
-            is_deleted, deleted_by,
-            TO_CHAR(deleted_at, 'DD/MM/YYYY HH24:MI:SS') as deleted_at
+            `SELECT 
+                column_id, stt, ma, khach_hang, ma_tai_lieu, rev, 
+                cong_venh, v_cut, xu_ly_be_mat, ghi_chu,
+                created_by, TO_CHAR(created_at, 'DD/MM/YYYY HH24:MI:SS') as created_at,
+                is_deleted, deleted_by,
+                TO_CHAR(deleted_at, 'DD/MM/YYYY HH24:MI:SS') as deleted_at,
+                restored_by, TO_CHAR(restored_at, 'DD/MM/YYYY HH24:MI:SS') as restored_at
             FROM document_columns 
             ORDER BY stt ASC`,
             {},
@@ -301,12 +302,13 @@ router.get('/list', async (req, res) => {
         // Xử lý dữ liệu GHI_CHU trước khi trả về
         const processedRows = result.rows.map(row => {
             const processedRow = { ...row };
-            if (processedRow.GHI_CHU) {
-                if (typeof processedRow.GHI_CHU === 'string') {
-                    if (processedRow.GHI_CHU.includes('_events') || 
-                        processedRow.GHI_CHU.includes('_readableState')) {
-                        processedRow.GHI_CHU = '';
-                    }
+            if (processedRow.GHI_CHU === null || processedRow.GHI_CHU === undefined) {
+                processedRow.GHI_CHU = '';
+            }
+            else if (typeof processedRow.GHI_CHU === 'string') {
+                if (processedRow.GHI_CHU.includes('_events') || 
+                    processedRow.GHI_CHU.includes('_readableState')) {
+                    processedRow.GHI_CHU = '';
                 }
             }
             return processedRow;
@@ -314,10 +316,19 @@ router.get('/list', async (req, res) => {
         
         res.json(processedRows);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Lỗi server' });
+        console.error('Error in /list route:', err);
+        res.status(500).json({ 
+            message: 'Lỗi server', 
+            error: err.message
+        });
     } finally {
-        if (connection) await connection.close();
+        if (connection) {
+            try {
+                await connection.close();
+            } catch (err) {
+                console.error('Error closing connection:', err);
+            }
+        }
     }
 });
 
@@ -483,6 +494,162 @@ router.put('/restore/:column_id', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Lỗi khi khôi phục dữ liệu' });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+// Thêm route xác nhận review
+router.post('/confirm-review', async (req, res) => {
+  const { column_id, review_type, reviewed_by } = req.body;
+  let connection;
+
+  try {
+    connection = await database.getConnection();
+    
+    // Check if a record already exists
+    const existingRecord = await connection.execute(
+      `SELECT id FROM review_status WHERE column_id = :column_id`,
+      { column_id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // Determine the review field based on the review type
+    const reviewField = review_type.toLowerCase() === 'ci' ? 'ci' : 'design';
+
+    if (existingRecord.rows.length === 0) {
+      // Create a new record
+      await connection.execute(
+        `INSERT INTO review_status (
+          id,
+          column_id,
+          rev_change_date,
+          ${reviewField}_reviewed,
+          ${reviewField}_reviewed_by,
+          ${reviewField}_reviewed_at
+        ) VALUES (
+          review_status_seq.NEXTVAL,
+          :column_id,
+          CURRENT_TIMESTAMP,
+          1,
+          :reviewed_by,
+          CURRENT_TIMESTAMP
+        )`,
+        { 
+          column_id: Number(column_id),
+          reviewed_by
+        }
+      );
+    } else {
+      // Update the existing record
+      await connection.execute(
+        `UPDATE review_status SET
+          ${reviewField}_reviewed = 1,
+          ${reviewField}_reviewed_by = :reviewed_by,
+          ${reviewField}_reviewed_at = CURRENT_TIMESTAMP
+        WHERE column_id = :column_id`,
+        { 
+          column_id: Number(column_id),
+          reviewed_by
+        }
+      );
+    }
+
+    await connection.commit();
+
+    // Return the updated status
+    const updatedStatus = await connection.execute(
+      `SELECT 
+        ci_reviewed,
+        design_reviewed,
+        ci_reviewed_by,
+        design_reviewed_by,
+        TO_CHAR(ci_reviewed_at, 'DD/MM/YYYY HH24:MI:SS') as ci_reviewed_at,
+        TO_CHAR(design_reviewed_at, 'DD/MM/YYYY HH24:MI:SS') as design_reviewed_at,
+        TO_CHAR(rev_change_date, 'DD/MM/YYYY HH24:MI:SS') as rev_change_date
+      FROM review_status 
+      WHERE column_id = :column_id`,
+      { column_id: Number(column_id) },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    res.json({
+      message: 'Cập nhật trạng thái review thành công',
+      status: updatedStatus.rows[0]
+    });
+
+  } catch (err) {
+    console.error('Error in confirm-review:', err);
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Error during rollback:', rollbackError);
+      }
+    }
+    res.status(500).json({ 
+      message: 'Lỗi khi cập nhật trạng thái review',
+      error: err.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+// Thêm route lấy trạng thái review
+router.get('/review-status/:column_id', async (req, res) => {
+  const { column_id } = req.params;
+  let connection;
+
+  try {
+    connection = await database.getConnection();
+    
+    const result = await connection.execute(
+      `SELECT 
+        ci_reviewed,
+        design_reviewed,
+        ci_reviewed_by,
+        design_reviewed_by,
+        TO_CHAR(ci_reviewed_at, 'DD/MM/YYYY HH24:MI:SS') as ci_reviewed_at,
+        TO_CHAR(design_reviewed_at, 'DD/MM/YYYY HH24:MI:SS') as design_reviewed_at,
+        TO_CHAR(rev_change_date, 'DD/MM/YYYY HH24:MI:SS') as rev_change_date
+      FROM review_status 
+      WHERE column_id = :column_id`,
+      { column_id: Number(column_id) },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // Đảm bảo luôn trả về một đối tượng có cấu trúc nhất quán
+    const defaultStatus = {
+      ci_reviewed: 0,
+      design_reviewed: 0,
+      ci_reviewed_by: null,
+      design_reviewed_by: null,
+      ci_reviewed_at: null,
+      design_reviewed_at: null,
+      rev_change_date: null
+    };
+
+    res.json(result.rows[0] || defaultStatus);
+
+  } catch (err) {
+    console.error('Error in review-status:', err);
+    res.status(500).json({ 
+      message: 'Lỗi khi lấy trạng thái review',
+      error: err.message 
+    });
   } finally {
     if (connection) {
       try {
