@@ -661,4 +661,64 @@ router.get('/review-status/:column_id', async (req, res) => {
   }
 });
 
+// Thêm route reset trạng thái review cho một trường cụ thể
+router.post('/reset-review-field', async (req, res) => {
+  const { column_id, field } = req.body;
+  let connection;
+
+  try {
+    connection = await database.getConnection();
+
+    // Map fields to database columns
+    const fieldMapping = {
+      V_CUT: 'ci_reviewed',
+      XU_LY_BE_MAT: 'ci_reviewed',
+      CONG_VENH: 'design_reviewed'
+    };
+
+    const reviewedColumn = fieldMapping[field];
+    const reviewedByColumn = `${reviewedColumn}_by`;
+    const reviewedAtColumn = `${reviewedColumn}_at`;
+
+    if (!reviewedColumn) {
+      return res.status(400).json({ message: `Invalid field: ${field}` });
+    }
+
+    // Reset the review status for the specific field
+    await connection.execute(
+      `UPDATE review_status
+       SET 
+         ${reviewedColumn} = 0,
+         ${reviewedByColumn} = NULL,
+         ${reviewedAtColumn} = NULL
+       WHERE column_id = :column_id`,
+      { column_id }
+    );
+
+    await connection.commit();
+    res.json({ message: `Trạng thái review cho trường ${field} đã được reset thành công` });
+  } catch (err) {
+    console.error('Error resetting review status for field:', err);
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Error during rollback:', rollbackError);
+      }
+    }
+    res.status(500).json({ 
+      message: 'Lỗi khi reset trạng thái review cho trường',
+      error: err.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
 module.exports = router;
