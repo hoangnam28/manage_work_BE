@@ -393,6 +393,7 @@ router.get('/get-all-images', async (req, res) => {
 });
 
 // API lấy lịch sử chỉnh sửa của một ô
+// Sửa route lấy lịch sử chỉnh sửa
 router.get('/edit-history/:column_id/:field', async (req, res) => {
   const { column_id, field } = req.params;
   let connection;
@@ -400,7 +401,19 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
   try {
     connection = await database.getConnection();
     
-    const result = await connection.execute(
+    // Lấy thông tin người tạo
+    const creatorInfo = await connection.execute(
+      `SELECT 
+        created_by,
+        TO_CHAR(created_at, 'DD/MM/YYYY HH24:MI:SS') as created_at
+       FROM document_columns 
+       WHERE column_id = :column_id`,
+      { column_id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // Lấy lịch sử chỉnh sửa
+    const editHistory = await connection.execute(
       `SELECT 
         h.history_id,
         h.column_id,
@@ -420,7 +433,10 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     
-    res.json(result.rows);
+    res.json({
+      creator: creatorInfo.rows[0],
+      history: editHistory.rows
+    });
   } catch (err) {
     res.status(500).json({ 
       message: 'Lỗi khi lấy lịch sử chỉnh sửa',
