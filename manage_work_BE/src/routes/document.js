@@ -528,19 +528,14 @@ router.post('/confirm-review', async (req, res) => {
 
   try {
     connection = await database.getConnection();
-    
-    // Check if a record already exists
     const existingRecord = await connection.execute(
       `SELECT id FROM review_status WHERE column_id = :column_id`,
       { column_id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-
-    // Determine the review field based on the review type
     const reviewField = review_type.toLowerCase() === 'ci' ? 'ci' : 'design';
 
     if (existingRecord.rows.length === 0) {
-      // Create a new record
       await connection.execute(
         `INSERT INTO review_status (
           id,
@@ -563,7 +558,6 @@ router.post('/confirm-review', async (req, res) => {
         }
       );
     } else {
-      // Update the existing record
       await connection.execute(
         `UPDATE review_status SET
           ${reviewField}_reviewed = 1,
@@ -677,7 +671,6 @@ router.get('/review-status/:column_id', async (req, res) => {
   }
 });
 
-// Thêm route reset trạng thái review cho một trường cụ thể
 router.post('/reset-review-field', async (req, res) => {
   const { column_id, field } = req.body;
   let connection;
@@ -700,7 +693,6 @@ router.post('/reset-review-field', async (req, res) => {
       return res.status(400).json({ message: `Invalid field: ${field}` });
     }
 
-    // Reset the review status for the specific field
     await connection.execute(
       `UPDATE review_status
        SET 
