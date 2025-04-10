@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const database = require('./config/database');
 const authRoutes = require('./routes/auth');  
 const documentationRoutes = require('./routes/document');
+const impedanceRoutes = require('./routes/impedance'); // New route for Impedance
 const path = require('path');
 const fs = require('fs');
 const app = express();
@@ -36,6 +37,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/document', documentationRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+app.use('/api/impedance', impedanceRoutes);
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
