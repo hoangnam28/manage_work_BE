@@ -25,7 +25,7 @@ router.post('/add', async (req, res) => {
         const stt = seqResult.rows[0][0];
         const result = await connection.execute(
             `INSERT INTO document_columns (
-                column_id, stt, ma, khach_hang, ma_tai_lieu,
+                column_id, stt, ma, khach_hang, ma_tai_lieu, doi tuong,
                 created_by, created_at
             ) VALUES (
                 seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu,
@@ -36,6 +36,7 @@ router.post('/add', async (req, res) => {
                 ma, 
                 khach_hang, 
                 ma_tai_lieu,
+                doi_tuong,
                 created_by
             },
             { autoCommit: true }
@@ -49,6 +50,7 @@ router.post('/add', async (req, res) => {
                 ma,
                 khach_hang,
                 ma_tai_lieu,
+                doi_tuong,
                 created_by
             }
         });
@@ -89,6 +91,7 @@ router.put('/update/:column_id', async (req, res) => {
       `UPDATE document_columns SET 
         ma = :ma,
         khach_hang = :khach_hang,
+        doi_tuong = :doi_tuong,
         ma_tai_lieu = :ma_tai_lieu,
         rev = :rev,
         cong_venh = :cong_venh,
@@ -99,6 +102,7 @@ router.put('/update/:column_id', async (req, res) => {
       { 
         ma: data.ma,
         khach_hang: data.khach_hang,
+        doi_tuong: data.doi_tuong,
         ma_tai_lieu: data.ma_tai_lieu,
         rev: data.rev,
         cong_venh: data.cong_venh,
@@ -287,7 +291,7 @@ router.get('/list', async (req, res) => {
         connection = await database.getConnection();
         const result = await connection.execute(
             `SELECT 
-                column_id, stt, ma, khach_hang, ma_tai_lieu, rev, 
+                column_id, stt, ma, khach_hang, ma_tai_lieu,doi_tuong, rev, 
                 cong_venh, v_cut, xu_ly_be_mat, ghi_chu,
                 created_by, TO_CHAR(created_at, 'DD/MM/YYYY HH24:MI:SS') as created_at,
                 is_deleted, deleted_by,
