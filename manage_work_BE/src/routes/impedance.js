@@ -41,4 +41,46 @@ router.get('/list-impedance', async (req, res) => {
     }
   }
 });
+router.post('/create-impedance', async (req, res) => {
+  const { imp_1, imp_2, imp_3, imp_4 } = req.body;
+  let connection;
+
+  try {
+    connection = await database.getConnection();
+
+    // Tự động tạo IMP_ID
+    const idResult = await connection.execute(
+      `SELECT NVL(MAX(TO_NUMBER(REPLACE(imp_id, 'IMP_ID_', ''))), 0) + 1 AS next_id
+       FROM impedances
+       WHERE REGEXP_LIKE(imp_id, '^IMP_ID_[0-9]+$')`
+    );
+    const nextId = idResult.rows[0].NEXT_ID;
+    const impId = `IMP_ID_${nextId}`;
+
+    // Thêm dữ liệu mới vào bảng
+    await connection.execute(
+      `INSERT INTO impedances (imp_id, imp_1, imp_2, imp_3, imp_4)
+       VALUES (:imp_id, :imp_1, :imp_2, :imp_3, :imp_4)`,
+      { imp_id: impId, imp_1, imp_2, imp_3, imp_4 }
+    );
+
+    await connection.commit();
+
+    res.json({
+      message: 'Thêm mới thành công',
+      data: { imp_id: impId, imp_1, imp_2, imp_3, imp_4 },
+    });
+  } catch (err) {
+    console.error('Error creating impedance:', err);
+    res.status(500).json({ message: 'Lỗi server', error: err.message });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
 module.exports = router;
