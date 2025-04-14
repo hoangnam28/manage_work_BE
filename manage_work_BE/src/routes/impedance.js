@@ -251,6 +251,9 @@ router.put('/update-impedance/:impId', async (req, res) => {
       message: 'Cập nhật thành công',
       data: updatedData
     };
+    
+    // Send the response with the updated data
+    res.json(response);
   } catch (err) {
     console.error('Error updating impedance:', err);
     logDebug('Error details:', {
