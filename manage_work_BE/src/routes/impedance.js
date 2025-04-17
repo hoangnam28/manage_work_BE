@@ -28,6 +28,7 @@ router.get('/list-impedance', async (req, res) => {
               IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
               IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, NOTE as note
        FROM impedances
+       WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
        ORDER BY IMP_ID`,
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -267,6 +268,66 @@ router.put('/update-impedance/:impId', async (req, res) => {
       message: 'Lỗi server', 
       error: err.message,
       stack: err.stack
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+router.put('/soft-delete-impedance/:impId', async (req, res) => {
+  const { impId } = req.params;
+  let connection;
+
+  try {
+    if (!impId || impId === 'undefined' || impId === 'null') {
+      return res.status(400).json({
+        message: 'ID không hợp lệ',
+        error: 'Yêu cầu cần có ID hợp lệ để xóa dữ liệu'
+      });
+    }
+
+    connection = await database.getConnection();
+    
+    // Check if record exists
+    const checkRecord = await connection.execute(
+      `SELECT COUNT(*) as COUNT FROM impedances WHERE IMP_ID = :id`,
+      { id: impId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    
+    if (!checkRecord.rows[0] || checkRecord.rows[0].COUNT === 0) {
+      return res.status(404).json({ 
+        message: 'Không tìm thấy bản ghi',
+        error: `Không tìm thấy bản ghi với ID ${impId}`
+      });
+    }
+
+    // Update is_deleted flag
+    const result = await connection.execute(
+      `UPDATE impedances SET IS_DELETED = 1 WHERE IMP_ID = :imp_id`,
+      { imp_id: impId },
+      { autoCommit: true }
+    );
+
+    if (result.rowsAffected === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy bản ghi với ID đã cung cấp' });
+    }
+
+    res.json({
+      message: 'Xóa thành công',
+      data: { imp_id: impId }
+    });
+  } catch (err) {
+    console.error('Error soft deleting impedance:', err);
+    res.status(500).json({ 
+      message: 'Lỗi server', 
+      error: err.message
     });
   } finally {
     if (connection) {
