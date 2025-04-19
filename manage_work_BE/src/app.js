@@ -5,6 +5,7 @@ const database = require('./config/database');
 const authRoutes = require('./routes/auth');  
 const documentationRoutes = require('./routes/document');
 const impedanceRoutes = require('./routes/impedance'); // New route for Impedance
+const userRoutes = require('./routes/user'); // New route for User Management
 const path = require('path');
 const fs = require('fs');
 const app = express();
@@ -39,6 +40,8 @@ app.use('/api/document', documentationRoutes);
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.use('/api/impedance', impedanceRoutes);
+
+app.use('/api/user', userRoutes); // Add user management routes
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
