@@ -15,54 +15,57 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 router.post('/add', async (req, res) => {
-    const { ma, khach_hang, ma_tai_lieu, created_by } = req.body;
-    let connection;
-    try {
-        connection = await database.getConnection();
-        const seqResult = await connection.execute(
-            `SELECT seq_document_columns.NEXTVAL as next_stt FROM DUAL`
-        );
-        const stt = seqResult.rows[0][0];
-        const result = await connection.execute(
-            `INSERT INTO document_columns (
-                column_id, stt, ma, khach_hang, ma_tai_lieu, doi tuong,
-                created_by, created_at
-            ) VALUES (
-                seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu,
-                :created_by, CURRENT_TIMESTAMP
-            )`,
-            { 
-                stt,
-                ma, 
-                khach_hang, 
-                ma_tai_lieu,
-                doi_tuong,
-                created_by
-            },
-            { autoCommit: true }
-        );
-        
-        res.json({ 
-            message: 'Thêm dữ liệu thành công', 
-            id: result.lastRowid,
-            data: {
-                stt,
-                ma,
-                khach_hang,
-                ma_tai_lieu,
-                doi_tuong,
-                created_by
-            }
-        });
-    } catch (err) {
-        console.error('Error adding record:', err);
-        res.status(500).json({ 
-            message: 'Lỗi server', 
-            error: err.message 
-        });
-    } finally {
-        if (connection) await connection.close();
-    }
+  const { ma, khach_hang, ma_tai_lieu, doi_tuong = null, created_by } = req.body; // Gán giá trị mặc định cho doi_tuong
+  let connection;
+
+  try {
+    connection = await database.getConnection();
+
+    const seqResult = await connection.execute(
+      `SELECT seq_document_columns.NEXTVAL as next_stt FROM DUAL`
+    );
+    const stt = seqResult.rows[0][0];
+
+    const result = await connection.execute(
+      `INSERT INTO document_columns (
+        column_id, stt, ma, khach_hang, ma_tai_lieu, doi_tuong,
+        created_by, created_at
+      ) VALUES (
+        seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu, :doi_tuong,
+        :created_by, CURRENT_TIMESTAMP
+      )`,
+      { 
+        stt,
+        ma, 
+        khach_hang, 
+        ma_tai_lieu,
+        doi_tuong, // Truyền giá trị doi_tuong (có thể là null)
+        created_by
+      },
+      { autoCommit: true }
+    );
+
+    res.json({ 
+      message: 'Thêm dữ liệu thành công', 
+      id: result.lastRowid,
+      data: {
+        stt,
+        ma,
+        khach_hang,
+        ma_tai_lieu,
+        doi_tuong,
+        created_by
+      }
+    });
+  } catch (err) {
+    console.error('Error adding record:', err);
+    res.status(500).json({ 
+      message: 'Lỗi server', 
+      error: err.message 
+    });
+  } finally {
+    if (connection) await connection.close();
+  }
 });
 
 router.put('/update/:column_id', async (req, res) => {
