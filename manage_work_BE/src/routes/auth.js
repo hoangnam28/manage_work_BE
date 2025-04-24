@@ -6,91 +6,71 @@ require('dotenv').config();
 const jwt = require('jsonwebtoken');
 
 router.post('/login', async (req, res) => {
-    const { company_id, password_hash } = req.body;
-    let connection;
+  const { company_id, password_hash } = req.body; // Changed from password to password_hash
+  let connection;
 
-    try {
-        connection = await database.getConnection();
-        // Log để debug
-        console.log('Login attempt - Company ID:', company_id);
+  try {
+    connection = await database.getConnection();
+    
+    const userCheck = await connection.execute(
+      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED
+       FROM users 
+       WHERE COMPANY_ID = :company_id`,
+      { company_id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
 
-        const result = await connection.execute(
-            `SELECT * FROM users WHERE TRIM(COMPANY_ID) = TRIM(:company_id)`,
-            { company_id: company_id },
-            { outFormat: oracledb.OUT_FORMAT_OBJECT }
-        );
-
-        // if (result.rows.length > 0) {
-        //     const user = result.rows[0];
-        //     console.log('Found user:', user);
-        //     console.log('Company ID from DB:', user.COMPANY_ID);
-        // }
-
-        if (result.rows.length === 0) {
-            // Log tất cả company_id trong DB để debug
-            const allUsers = await connection.execute(
-                `SELECT COMPANY_ID FROM users`,
-                [],
-                { outFormat: oracledb.OUT_FORMAT_OBJECT }
-            );
-            
-            return res.status(401).json({ 
-                message: 'ID của bạn nhập không tồn tại',
-                debug: {
-                    attempted_company_id: company_id,
-                    company_id_length: company_id.length
-                }
-            });
-        }   
-
-        const user = result.rows[0];
-        if (password_hash.trim() !== user.PASSWORD_HASH.trim()) {
-            return res.status(401).json({ 
-                message: 'Mật khẩu không đúng',
-                debug: {
-                    inputPassword: password_hash,
-                    storedPassword: user.PASSWORD_HASH,
-                    passwordLength: {
-                        input: password_hash.length,
-                        stored: user.PASSWORD_HASH.length
-                    }
-                }
-            });
-        }
-
-        const token = jwt.sign(
-            { 
-                username: user.USERNAME,
-                userId: user.USER_ID,
-                company_id: user.COMPANY_ID.trim()
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-
-        res.json({
-            message: 'Đăng nhập thành công',
-            accessToken: token,
-            user: {
-                username: user.USERNAME,
-                userId: user.USER_ID,
-                company_id: user.COMPANY_ID.trim()
-            }
-        });
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ message: 'Lỗi server' });
-    } finally {
-        if (connection) {
-            try {
-                await connection.close();
-            } catch (err) {
-                console.error('Error closing connection:', err);
-            }
-        }
+    if (userCheck.rows.length === 0) {
+      return res.status(401).json({ message: 'ID công ty hoặc mật khẩu không đúng' });
     }
-});
 
+    const user = userCheck.rows[0];
+
+    // Check if account is disabled
+    if (user.IS_DELETED === 1) {
+      return res.status(403).json({ message: 'Tài khoản của bạn đã bị vô hiệu hóa' });
+    }
+
+    // Check password_hash without trim()
+    if (password_hash !== user.PASSWORD_HASH) {
+      return res.status(401).json({ 
+        message: 'ID công ty hoặc mật khẩu không đúng'
+      });
+    }
+
+    // Generate token and complete login
+    const token = jwt.sign(
+      { 
+        username: user.USERNAME,
+        userId: user.USER_ID,
+        company_id: user.COMPANY_ID.trim()
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      message: 'Đăng nhập thành công',
+      accessToken: token,
+      user: {
+        username: user.USERNAME,
+        userId: user.USER_ID,
+        company_id: user.COMPANY_ID.trim()
+      }
+    });
+  } catch (error) {
+    console.error('Error during login:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
 // Thêm API để lấy avatar
 router.get('/avatar/:user_id', async (req, res) => {
     const { user_id } = req.params;

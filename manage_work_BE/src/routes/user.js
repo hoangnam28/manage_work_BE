@@ -63,14 +63,18 @@ router.get('/list', authenticateToken, checkAdminPermission, async (req, res) =>
     const result = await connection.execute(
       `SELECT USER_ID, USERNAME, COMPANY_ID, CREATED_AT, DEPARTMENT, AVATAR
        FROM users
-       ORDER BY USER_ID`,
+       WHERE IS_DELETED = 0
+       ORDER BY USER_ID ASC`,
       {},
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      { 
+        maxRows: 1000000,
+        outFormat: oracledb.OUT_FORMAT_OBJECT 
+      }
     );
     res.json(result.rows);
   } catch (error) {
     console.error('Error fetching users:', error);
-    res.status(500).json({ message: 'Lỗi server' });
+    res.status(500).json({ message: 'Lỗi server', error: error.message });
   } finally {
     if (connection) {
       try {
@@ -155,54 +159,79 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
 // Cập nhật thông tin user
 router.put('/update/:userId', authenticateToken, checkAdminPermission, async (req, res) => {
   const { userId } = req.params;
-  const { username, password, fullname, email, company_id } = req.body; // Remove is_admin from destructuring
+  const { username, password_hash } = req.body;
   let connection;
 
   try {
     connection = await database.getConnection();
+
+    // First, check if user exists and get current data
+    const userExists = await connection.execute(
+      `SELECT USERNAME, PASSWORD_HASH FROM users 
+       WHERE USER_ID = :user_id AND IS_DELETED = 0`,
+      { user_id: userId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (userExists.rows.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+    }
+
+    // Prepare update fields
     const updateFields = [];
     const bindParams = { user_id: userId };
 
-    if (username) {
-      updateFields.push('username = :username');
+    // Only update username if it's provided and different
+    if (username && username !== userExists.rows[0].USERNAME) {
+      const usernameCheck = await connection.execute(
+        `SELECT COUNT(*) as COUNT FROM users 
+         WHERE USERNAME = :username 
+         AND USER_ID != :user_id 
+         AND IS_DELETED = 0`,
+        { username, user_id: userId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      if (usernameCheck.rows[0].COUNT > 0) {
+        return res.status(400).json({ message: 'Tên người dùng đã tồn tại' });
+      }
+
+      updateFields.push('USERNAME = :username');
       bindParams.username = username;
     }
 
-    if (password) {
-      const hashedPassword = await bcrypt.hash(password, 10);
-      updateFields.push('password_hash = :password'); // Changed 'password' to 'password_hash' to match DB
-      bindParams.password = hashedPassword;
-    }
-
-    if (fullname) {
-      updateFields.push('fullname = :fullname');
-      bindParams.fullname = fullname;
-    }
-
-    // Remove is_admin update section since we don't have that column
-
-    if (company_id) {
-      updateFields.push('company_id = :company_id');
-      bindParams.company_id = company_id;
+    // Only update password if it's provided
+    if (password_hash) {
+      updateFields.push('PASSWORD_HASH = :password_hash');
+      bindParams.password_hash = password_hash;
     }
 
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có thông tin nào được cập nhật' });
     }
 
+    // Perform update
     const updateQuery = `
       UPDATE users 
       SET ${updateFields.join(', ')}
-      WHERE user_id = :user_id
+      WHERE USER_ID = :user_id
+      AND IS_DELETED = 0
     `;
 
     const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
 
-    if (result.rowsAffected === 0) {
-      return res.status(404).json({ message: 'Không tìm thấy người dùng' });
-    }
+    // Get updated user data
+    const updatedUser = await connection.execute(
+      `SELECT USER_ID, USERNAME FROM users WHERE USER_ID = :user_id`,
+      { user_id: userId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
 
-    res.json({ message: 'Cập nhật thông tin người dùng thành công' });
+    res.json({
+      message: 'Cập nhật thông tin người dùng thành công',
+      data: updatedUser.rows[0]
+    });
+
   } catch (error) {
     console.error('Error updating user:', error);
     res.status(500).json({ message: 'Lỗi server', error: error.message });
@@ -223,17 +252,23 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
   try {
     connection = await database.getConnection();
 
+    // Check if user exists and not already deleted
     const checkResult = await connection.execute(
-      `SELECT COUNT(*) as COUNT FROM users WHERE USER_ID = :user_id`,
+      `SELECT COUNT(*) as COUNT FROM users 
+       WHERE USER_ID = :user_id AND IS_DELETED = 0`,
       { user_id: userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
     if (checkResult.rows[0].COUNT === 0) {
-      return res.status(404).json({ message: 'Không tìm thấy user' });
+      return res.status(404).json({ message: 'Không tìm thấy user hoặc user đã bị xóa' });
     }
+
+    // Update IS_DELETED flag without UPDATED_AT
     await connection.execute(
-      `DELETE FROM users WHERE USER_ID = :user_id`,
+      `UPDATE users 
+       SET IS_DELETED = 1
+       WHERE USER_ID = :user_id`,
       { user_id: userId },
       { autoCommit: true }
     );
@@ -243,8 +278,8 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
       data: { user_id: userId }
     });
   } catch (error) {
-    console.error('Error deleting user:', error);
-    res.status(500).json({ message: 'Lỗi server' });
+    console.error('Error soft deleting user:', error);
+    res.status(500).json({ message: 'Lỗi server', error: error.message });
   } finally {
     if (connection) {
       try {
@@ -255,5 +290,4 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
     }
   }
 });
-
-module.exports = router; 
+module.exports = router;
