@@ -155,75 +155,67 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
 // Cập nhật thông tin user
 router.put('/update/:userId', authenticateToken, checkAdminPermission, async (req, res) => {
   const { userId } = req.params;
-  const { username, password_hash, is_admin } = req.body;
+  const { username, password, fullname, email, company_id } = req.body; // Remove is_admin from destructuring
   let connection;
 
   try {
     connection = await database.getConnection();
-
-    // Check if user exists
-    const checkResult = await connection.execute(
-      `SELECT COUNT(*) as COUNT FROM users WHERE USER_ID = :user_id`,
-      { user_id: userId },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-
-    if (checkResult.rows[0].COUNT === 0) {
-      return res.status(404).json({ message: 'Không tìm thấy user' });
-    }
-
-    // Build update query based on provided fields
-    let updateFields = [];
-    let bindParams = { user_id: userId };
+    const updateFields = [];
+    const bindParams = { user_id: userId };
 
     if (username) {
-      updateFields.push('USERNAME = :username');
-      bindParams.username = username.trim();
+      updateFields.push('username = :username');
+      bindParams.username = username;
     }
 
-    if (password_hash) {
-      updateFields.push('PASSWORD_HASH = :password_hash');
-      bindParams.password_hash = password_hash.trim();
+    if (password) {
+      const hashedPassword = await bcrypt.hash(password, 10);
+      updateFields.push('password_hash = :password'); // Changed 'password' to 'password_hash' to match DB
+      bindParams.password = hashedPassword;
     }
 
-    if (is_admin !== undefined) {
-      updateFields.push('IS_ADMIN = :is_admin');
-      bindParams.is_admin = is_admin ? 1 : 0;
+    if (fullname) {
+      updateFields.push('fullname = :fullname');
+      bindParams.fullname = fullname;
+    }
+
+    // Remove is_admin update section since we don't have that column
+
+    if (company_id) {
+      updateFields.push('company_id = :company_id');
+      bindParams.company_id = company_id;
     }
 
     if (updateFields.length === 0) {
-      return res.status(400).json({ message: 'Không có trường nào được cập nhật' });
+      return res.status(400).json({ message: 'Không có thông tin nào được cập nhật' });
     }
 
-    // Execute update
-    await connection.execute(
-      `UPDATE users SET ${updateFields.join(', ')} WHERE USER_ID = :user_id`,
-      bindParams,
-      { autoCommit: true }
-    );
+    const updateQuery = `
+      UPDATE users 
+      SET ${updateFields.join(', ')}
+      WHERE user_id = :user_id
+    `;
 
-    res.json({
-      message: 'Cập nhật thành công',
-      data: {
-        user_id: userId,
-        ...bindParams
-      }
-    });
+    const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
+
+    if (result.rowsAffected === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy người dùng' });
+    }
+
+    res.json({ message: 'Cập nhật thông tin người dùng thành công' });
   } catch (error) {
     console.error('Error updating user:', error);
-    res.status(500).json({ message: 'Lỗi server' });
+    res.status(500).json({ message: 'Lỗi server', error: error.message });
   } finally {
     if (connection) {
       try {
         await connection.close();
-      } catch (err) {
-        console.error('Error closing connection:', err);
+      } catch (error) {
+        console.error('Error closing connection:', error);
       }
     }
   }
 });
-
-// Xóa user
 router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async (req, res) => {
   const { userId } = req.params;
   let connection;
@@ -231,7 +223,6 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
   try {
     connection = await database.getConnection();
 
-    // Check if user exists
     const checkResult = await connection.execute(
       `SELECT COUNT(*) as COUNT FROM users WHERE USER_ID = :user_id`,
       { user_id: userId },
@@ -241,8 +232,6 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
     if (checkResult.rows[0].COUNT === 0) {
       return res.status(404).json({ message: 'Không tìm thấy user' });
     }
-
-    // Delete user
     await connection.execute(
       `DELETE FROM users WHERE USER_ID = :user_id`,
       { user_id: userId },
