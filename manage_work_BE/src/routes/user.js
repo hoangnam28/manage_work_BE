@@ -164,8 +164,6 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
 
   try {
     connection = await database.getConnection();
-
-    // First, check if user exists and get current data
     const userExists = await connection.execute(
       `SELECT USERNAME, PASSWORD_HASH FROM users 
        WHERE USER_ID = :user_id AND IS_DELETED = 0`,
@@ -176,12 +174,8 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
     if (userExists.rows.length === 0) {
       return res.status(404).json({ message: 'Không tìm thấy người dùng' });
     }
-
-    // Prepare update fields
     const updateFields = [];
     const bindParams = { user_id: userId };
-
-    // Only update username if it's provided and different
     if (username && username !== userExists.rows[0].USERNAME) {
       const usernameCheck = await connection.execute(
         `SELECT COUNT(*) as COUNT FROM users 
@@ -199,8 +193,6 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
       updateFields.push('USERNAME = :username');
       bindParams.username = username;
     }
-
-    // Only update password if it's provided
     if (password_hash) {
       updateFields.push('PASSWORD_HASH = :password_hash');
       bindParams.password_hash = password_hash;
@@ -209,8 +201,6 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có thông tin nào được cập nhật' });
     }
-
-    // Perform update
     const updateQuery = `
       UPDATE users 
       SET ${updateFields.join(', ')}
@@ -220,7 +210,6 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
 
     const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
 
-    // Get updated user data
     const updatedUser = await connection.execute(
       `SELECT USER_ID, USERNAME FROM users WHERE USER_ID = :user_id`,
       { user_id: userId },
@@ -251,8 +240,6 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
 
   try {
     connection = await database.getConnection();
-
-    // Check if user exists and not already deleted
     const checkResult = await connection.execute(
       `SELECT COUNT(*) as COUNT FROM users 
        WHERE USER_ID = :user_id AND IS_DELETED = 0`,
@@ -264,7 +251,7 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
       return res.status(404).json({ message: 'Không tìm thấy user hoặc user đã bị xóa' });
     }
 
-    // Update IS_DELETED flag without UPDATED_AT
+
     await connection.execute(
       `UPDATE users 
        SET IS_DELETED = 1
