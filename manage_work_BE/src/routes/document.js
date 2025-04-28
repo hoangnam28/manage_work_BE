@@ -6,7 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Trong file config database
+
 oracledb.fetchAsBuffer = [ oracledb.BLOB ];
 oracledb.autoCommit = true;
 const uploadDir = path.join(__dirname, '../../uploads');
@@ -15,7 +15,7 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 router.post('/add', async (req, res) => {
-  const { ma, khach_hang, ma_tai_lieu, doi_tuong = null, created_by } = req.body; // Gán giá trị mặc định cho doi_tuong
+  const { ma, khach_hang, ma_tai_lieu, doi_tuong = null, created_by } = req.body; 
   let connection;
 
   try {
@@ -75,8 +75,6 @@ router.put('/update/:column_id', async (req, res) => {
 
   try {
     connection = await database.getConnection();
-    
-    // Lấy dữ liệu cũ để so sánh
     const oldDataResult = await connection.execute(
       `SELECT * FROM document_columns WHERE column_id = :column_id`,
       { column_id },
@@ -88,8 +86,6 @@ router.put('/update/:column_id', async (req, res) => {
     }
 
     const oldData = oldDataResult.rows[0];
-    
-    // Cập nhật dữ liệu không sử dụng formattedData
     await connection.execute(
       `UPDATE document_columns SET 
         ma = :ma,
@@ -115,8 +111,6 @@ router.put('/update/:column_id', async (req, res) => {
         column_id
       }
     );
-
-    // Lưu lịch sử chỉnh sửa
     for (const [field, newValue] of Object.entries(data)) {
       if (field !== 'edited_by') {
         const oldValue = oldData[field.toUpperCase()];
@@ -183,7 +177,7 @@ router.put('/update/:column_id', async (req, res) => {
   }
 });
 
-// Xóa dữ liệu
+
 router.delete('/delete/:column_id', async (req, res) => {
     const { column_id } = req.params;
     let connection;
@@ -408,7 +402,6 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
   try {
     connection = await database.getConnection();
     
-    // Lấy thông tin người tạo
     const creatorInfo = await connection.execute(
       `SELECT 
         created_by,
@@ -419,7 +412,6 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    // Lấy lịch sử chỉnh sửa
     const editHistory = await connection.execute(
       `SELECT 
         h.history_id,
@@ -528,7 +520,6 @@ router.put('/restore/:column_id', async (req, res) => {
   }
 });
 
-// Thêm route xác nhận review
 router.post('/confirm-review', async (req, res) => {
   const { column_id, review_type, reviewed_by } = req.body;
   let connection;
@@ -579,8 +570,6 @@ router.post('/confirm-review', async (req, res) => {
     }
 
     await connection.commit();
-
-    // Return the updated status
     const updatedStatus = await connection.execute(
       `SELECT 
         ci_reviewed,
@@ -625,7 +614,6 @@ router.post('/confirm-review', async (req, res) => {
   }
 });
 
-// Thêm route lấy trạng thái review
 router.get('/review-status/:column_id', async (req, res) => {
   const { column_id } = req.params;
   let connection;
@@ -647,8 +635,6 @@ router.get('/review-status/:column_id', async (req, res) => {
       { column_id: Number(column_id) },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-
-    // Đảm bảo luôn trả về một đối tượng có cấu trúc nhất quán
     const defaultStatus = {
       ci_reviewed: 0,
       design_reviewed: 0,
