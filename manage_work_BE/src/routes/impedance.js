@@ -9,14 +9,6 @@ const fs = require('fs');
 oracledb.fetchAsBuffer = [oracledb.BLOB];
 oracledb.autoCommit = true;
 
-// Helper to log detailed information about requests and errors
-const logDebug = (title, data) => {
-  console.log('\n=======================');
-  console.log(title);
-  console.log(typeof data === 'object' ? JSON.stringify(data, null, 2) : data);
-  console.log('=======================\n');
-};
-
 router.get('/list-impedance', async (req, res) => {
   let connection;
   try {
@@ -54,13 +46,9 @@ router.get('/list-impedance', async (req, res) => {
 router.post('/create-impedance', async (req, res) => {
   let connection;
   try {
-    // Log the request data for debugging
-    const data = req.body;
-    logDebug('Request data for create:', data);
     
+    const data = req.body;
     connection = await database.getConnection();
-
-    // Get the next ID 
     const idResult = await connection.execute(
       `SELECT NVL(MAX(IMP_ID), 0) + 1 AS next_id FROM impedances`,
       {},
@@ -185,7 +173,7 @@ router.put('/update-impedance/:impId', async (req, res) => {
       });
     }
     const updateFields = [];
-    const bindParams = { imp_id: impId }; // Use the original ID string
+    const bindParams = { imp_id: impId }; 
     for (let i = 1; i <= 30; i++) {
       const reqField = `imp_${i}`; 
       const dbField = `IMP_${i}`;  
@@ -195,18 +183,18 @@ router.put('/update-impedance/:impId', async (req, res) => {
       }
     }
     
-    // Add note field if provided
+    
     if (updateData.note !== undefined && updateData.note !== null) {
       updateFields.push(`NOTE = :note`);
       bindParams.note = updateData.note;
     }
     
-    // Check if there are fields to update
+    
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có trường dữ liệu nào được cung cấp để cập nhật' });
     }
     
-    // Construct and execute the update query
+    
     const updateQuery = `
       UPDATE impedances 
       SET ${updateFields.join(', ')} 
@@ -219,7 +207,6 @@ router.put('/update-impedance/:impId', async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi với ID đã cung cấp' });
     }
 
-    // Fetch the updated record to return in the response
     const updatedRecord = await connection.execute(
       `SELECT IMP_ID as imp_id, 
               IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
@@ -253,7 +240,6 @@ router.put('/update-impedance/:impId', async (req, res) => {
       data: updatedData
     };
     
-    // Send the response with the updated data
     res.json(response);
   } catch (err) {
     console.error('Error updating impedance:', err);
@@ -294,7 +280,6 @@ router.put('/soft-delete-impedance/:impId', async (req, res) => {
 
     connection = await database.getConnection();
     
-    // Check if record exists
     const checkRecord = await connection.execute(
       `SELECT COUNT(*) as COUNT FROM impedances WHERE IMP_ID = :id`,
       { id: impId },
@@ -308,7 +293,6 @@ router.put('/soft-delete-impedance/:impId', async (req, res) => {
       });
     }
 
-    // Update is_deleted flag
     const result = await connection.execute(
       `UPDATE impedances SET IS_DELETED = 1 WHERE IMP_ID = :imp_id`,
       { imp_id: impId },
