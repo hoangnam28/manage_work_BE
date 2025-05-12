@@ -18,10 +18,11 @@ router.get('/list-impedance', async (req, res) => {
               IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
               IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
               IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, NOTE as note
+              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33, IMP_34, IMP_35,
+              NOTE as note
        FROM impedances
        WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
-       ORDER BY IMP_ID`,
+       ORDER BY IMP_ID DESC`,
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -56,7 +57,7 @@ router.post('/create-impedance', async (req, res) => {
     );
     
     const nextId = idResult.rows[0].NEXT_ID;
-    logDebug('Next ID:', nextId);
+    console.log('Next ID:', nextId); // Changed from logDebug to console.log
 
     // Build SQL column list and values list
     let columns = ['IMP_ID']; // uppercase field names
@@ -64,7 +65,7 @@ router.post('/create-impedance', async (req, res) => {
     let placeholders = [':imp_id']; 
     
     // Process all possible impedance fields
-    for (let i = 1; i <= 30; i++) {
+    for (let i = 1; i <= 35; i++) {
       const reqField = `imp_${i}`; // Field name in request
       const dbField = `IMP_${i}`;  // Field name in database
       
@@ -95,7 +96,8 @@ router.post('/create-impedance', async (req, res) => {
               IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
               IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
               IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, NOTE as note
+              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33, IMP_34, IMP_35,
+              NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
       { imp_id: nextId },
@@ -108,7 +110,7 @@ router.post('/create-impedance', async (req, res) => {
     
     // Add lowercase versions for compatibility
     const responseData = newRecord.rows[0];
-    for (let i = 1; i <= 30; i++) {
+    for (let i = 1; i <= 35; i++) {
       const upperField = `IMP_${i}`;
       const lowerField = `imp_${i}`;
       if (responseData[upperField]) {
@@ -122,7 +124,7 @@ router.post('/create-impedance', async (req, res) => {
     });
   } catch (err) {
     console.error('Error creating impedance:', err);
-    logDebug('Error details:', {
+    console.log('Error details:', { // Changed from logDebug to console.log
       message: err.message,
       stack: err.stack,
       code: err.code,
@@ -174,7 +176,7 @@ router.put('/update-impedance/:impId', async (req, res) => {
     }
     const updateFields = [];
     const bindParams = { imp_id: impId }; 
-    for (let i = 1; i <= 30; i++) {
+    for (let i = 1; i <= 35; i++) {
       const reqField = `imp_${i}`; 
       const dbField = `IMP_${i}`;  
       if (updateData[reqField] !== undefined && updateData[reqField] !== null) {
@@ -212,7 +214,8 @@ router.put('/update-impedance/:impId', async (req, res) => {
               IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
               IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
               IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, NOTE as note
+              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33, IMP_34, IMP_35,
+              NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
       { imp_id: impId },
@@ -223,7 +226,7 @@ router.put('/update-impedance/:impId', async (req, res) => {
       throw new Error('Failed to retrieve updated record');
     }
     const updatedData = updatedRecord.rows[0];
-    for (let i = 1; i <= 30; i++) {
+    for (let i = 1; i <= 35; i++) {
       const upperKey = `IMP_${i}`;
       const lowerKey = `imp_${i}`;
       if (updatedData[upperKey] !== undefined) {
@@ -243,7 +246,7 @@ router.put('/update-impedance/:impId', async (req, res) => {
     res.json(response);
   } catch (err) {
     console.error('Error updating impedance:', err);
-    logDebug('Error details:', {
+    console.log('Error details:', { // Changed from logDebug to console.log
       message: err.message,
       stack: err.stack,
       code: err.code,

@@ -6,7 +6,7 @@ require('dotenv').config();
 const jwt = require('jsonwebtoken');
 
 router.post('/login', async (req, res) => {
-  const { company_id, password_hash } = req.body; // Changed from password to password_hash
+  const { company_id, password_hash } = req.body; 
   let connection;
 
   try {
@@ -23,14 +23,11 @@ router.post('/login', async (req, res) => {
     if (userCheck.rows.length === 0) {
       return res.status(401).json({ message: 'ID công ty hoặc mật khẩu không đúng' });
     }
-
     const user = userCheck.rows[0];
-
     // Check if account is disabled
     if (user.IS_DELETED === 1) {
       return res.status(403).json({ message: 'Tài khoản của bạn đã bị vô hiệu hóa' });
     }
-
     // Check password_hash without trim()
     if (password_hash !== user.PASSWORD_HASH) {
       return res.status(401).json({ 
