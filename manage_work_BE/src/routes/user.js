@@ -28,16 +28,13 @@ const checkAdminPermission = async (req, res, next) => {
   let connection;
   try {
     connection = await database.getConnection();
-    // Since there's no IS_ADMIN column, we'll use a specific COMPANY_ID or other logic to determine admin
     const result = await connection.execute(
-      `SELECT COMPANY_ID FROM users WHERE COMPANY_ID = :company_id`,
+      `SELECT ROLE FROM users WHERE COMPANY_ID = :company_id`,
       { company_id: req.user.company_id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    // You might want to define specific COMPANY_IDs that have admin access
-    const adminCompanyIds = ['000001'];
-    if (result.rows.length === 0 || !adminCompanyIds.includes(result.rows[0].COMPANY_ID)) {
+    if (result.rows.length === 0 || result.rows[0].ROLE !== 'admin') {
       return res.status(403).json({ message: 'Bạn không có quyền truy cập trang này' });
     }
     next();
@@ -61,7 +58,7 @@ router.get('/list', authenticateToken, checkAdminPermission, async (req, res) =>
   try {
     connection = await database.getConnection();
     const result = await connection.execute(
-      `SELECT USER_ID, USERNAME, COMPANY_ID, CREATED_AT, DEPARTMENT, AVATAR
+      `SELECT USER_ID, USERNAME, COMPANY_ID, CREATED_AT, DEPARTMENT, AVATAR, ROLE
        FROM users
        WHERE IS_DELETED = 0
        ORDER BY USER_ID ASC`,
@@ -88,13 +85,19 @@ router.get('/list', authenticateToken, checkAdminPermission, async (req, res) =>
 
 // Tạo user mới
 router.post('/create', authenticateToken, checkAdminPermission, async (req, res) => {
-  const { username, company_id, password_hash, department } = req.body;
+  const { username, company_id, password_hash, department, role } = req.body;
   let connection;
 
   try {
     // Validate input
-    if (!username || !company_id || !password_hash) {
+    if (!username || !company_id || !password_hash || !role) {
       return res.status(400).json({ message: 'Thiếu thông tin bắt buộc' });
+    }
+
+    // Validate role
+    const validRoles = ['admin', 'editor', 'viewer'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ message: 'Role không hợp lệ' });
     }
 
     connection = await database.getConnection();
@@ -121,14 +124,15 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
 
     // Insert new user
     await connection.execute(
-      `INSERT INTO users (USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, DEPARTMENT, CREATED_AT)
-       VALUES (:user_id, :username, :company_id, :password_hash, :department, SYSDATE)`,
+      `INSERT INTO users (USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, DEPARTMENT, CREATED_AT, ROLE)
+       VALUES (:user_id, :username, :company_id, :password_hash, :department, SYSDATE, :role)`,
       {
         user_id: nextId,
         username: username.trim(),
         company_id: company_id.trim(),
         password_hash: password_hash.trim(),
-        department: department ? department.trim() : null
+        department: department ? department.trim() : null,
+        role: role
       },
       { autoCommit: true }
     );
@@ -139,7 +143,8 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
         user_id: nextId,
         username: username.trim(),
         company_id: company_id.trim(),
-        department: department
+        department: department,
+        role: role
       }
     });
   } catch (error) {
@@ -159,13 +164,13 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
 // Cập nhật thông tin user
 router.put('/update/:userId', authenticateToken, checkAdminPermission, async (req, res) => {
   const { userId } = req.params;
-  const { username, password_hash } = req.body;
+  const { username, password_hash, role } = req.body;
   let connection;
 
   try {
     connection = await database.getConnection();
     const userExists = await connection.execute(
-      `SELECT USERNAME, PASSWORD_HASH FROM users 
+      `SELECT USERNAME, PASSWORD_HASH, ROLE FROM users 
        WHERE USER_ID = :user_id AND IS_DELETED = 0`,
       { user_id: userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -174,8 +179,18 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
     if (userExists.rows.length === 0) {
       return res.status(404).json({ message: 'Không tìm thấy người dùng' });
     }
+
+    // Validate role if provided
+    if (role) {
+      const validRoles = ['admin', 'editor', 'viewer'];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({ message: 'Role không hợp lệ' });
+      }
+    }
+
     const updateFields = [];
     const bindParams = { user_id: userId };
+
     if (username && username !== userExists.rows[0].USERNAME) {
       const usernameCheck = await connection.execute(
         `SELECT COUNT(*) as COUNT FROM users 
@@ -193,14 +208,21 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
       updateFields.push('USERNAME = :username');
       bindParams.username = username;
     }
+
     if (password_hash) {
       updateFields.push('PASSWORD_HASH = :password_hash');
       bindParams.password_hash = password_hash;
     }
 
+    if (role && role !== userExists.rows[0].ROLE) {
+      updateFields.push('ROLE = :role');
+      bindParams.role = role;
+    }
+
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có thông tin nào được cập nhật' });
     }
+
     const updateQuery = `
       UPDATE users 
       SET ${updateFields.join(', ')}
@@ -211,7 +233,7 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
     const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
 
     const updatedUser = await connection.execute(
-      `SELECT USER_ID, USERNAME FROM users WHERE USER_ID = :user_id`,
+      `SELECT USER_ID, USERNAME, ROLE FROM users WHERE USER_ID = :user_id`,
       { user_id: userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );

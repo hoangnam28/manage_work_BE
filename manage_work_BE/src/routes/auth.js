@@ -13,7 +13,7 @@ router.post('/login', async (req, res) => {
     connection = await database.getConnection();
     
     const userCheck = await connection.execute(
-      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED
+      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED, ROLE
        FROM users 
        WHERE COMPANY_ID = :company_id`,
       { company_id },
@@ -40,7 +40,8 @@ router.post('/login', async (req, res) => {
       { 
         username: user.USERNAME,
         userId: user.USER_ID,
-        company_id: user.COMPANY_ID.trim()
+        company_id: user.COMPANY_ID.trim(),
+        role: user.ROLE
       },
       process.env.JWT_SECRET,
       { expiresIn: '24h' }
@@ -52,7 +53,8 @@ router.post('/login', async (req, res) => {
       user: {
         username: user.USERNAME,
         userId: user.USER_ID,
-        company_id: user.COMPANY_ID.trim()
+        company_id: user.COMPANY_ID.trim(),
+        role: user.ROLE
       }
     });
   } catch (error) {
@@ -121,7 +123,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
   try {
     connection = await database.getConnection();
     const result = await connection.execute(
-      `SELECT username, company_id FROM users WHERE company_id = :company_id`,
+      `SELECT username, company_id, role FROM users WHERE company_id = :company_id`,
       { company_id: req.user.company_id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -133,7 +135,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
     const user = result.rows[0];
     res.json({
       username: user.USERNAME,
-      company_id: user.COMPANY_ID.trim()
+      company_id: user.COMPANY_ID.trim(),
+      role: user.ROLE
     });
   } catch (error) {
     console.error('Error fetching profile:', error);
