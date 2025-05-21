@@ -32,7 +32,7 @@ const checkUserPermission = async (req, res, next) => {
   let connection;
   try {
     connection = await database.getConnection();    // Kiểm tra company_id từ token
-    if (req.user.company_id !== '001507') {
+    if (req.user.company_id !== '001507' && req.user.company_id !== '021253') {
       return res.status(403).json({ message: 'Bạn không có quyền truy cập trang này' });
     }
     next();
@@ -50,7 +50,31 @@ const checkUserPermission = async (req, res, next) => {
   }
 };
 
-router.get('/list-impedance', authenticateToken, checkUserPermission, async (req, res) => {
+// Middleware kiểm tra quyền chỉnh sửa
+const checkEditPermission = async (req, res, next) => {
+  let connection;
+  try {
+    connection = await database.getConnection();
+    if (req.user.company_id !== '001507' ) {
+      return res.status(403).json({ message: 'Bạn không có quyền thực hiện thao tác này' });
+    }
+    next();
+  } catch (error) {
+    console.error('Error checking edit permission:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+};
+
+// Route chỉ cần xác thực token để xem
+router.get('/list-impedance', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
@@ -85,7 +109,8 @@ router.get('/list-impedance', authenticateToken, checkUserPermission, async (req
   }
 });
 
-router.post('/create-impedance', authenticateToken, checkUserPermission, async (req, res) => {
+// Các route cần quyền chỉnh sửa
+router.post('/create-impedance', authenticateToken, checkEditPermission, async (req, res) => {
   let connection;
   try {
     
@@ -100,7 +125,7 @@ router.post('/create-impedance', authenticateToken, checkUserPermission, async (
     const nextId = idResult.rows[0].NEXT_ID;
     console.log('Next ID:', nextId); // Changed from logDebug to console.log
 
-    // Build SQL column list and values list
+    // Build SQL column and values list
     let columns = ['IMP_ID']; // uppercase field names
     let bindVars = { imp_id: nextId }; // lowercase bind variable names
     let placeholders = [':imp_id']; 
@@ -189,7 +214,7 @@ router.post('/create-impedance', authenticateToken, checkUserPermission, async (
   }
 });
 
-router.put('/update-impedance/:impId', authenticateToken, checkUserPermission, async (req, res) => {
+router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, async (req, res) => {
   const { impId } = req.params;
   const updateData = req.body;
   let connection;
@@ -310,7 +335,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkUserPermission, a
   }
 });
 
-router.put('/soft-delete-impedance/:impId', authenticateToken, checkUserPermission, async (req, res) => {
+router.put('/soft-delete-impedance/:impId', authenticateToken, checkEditPermission, async (req, res) => {
   const { impId } = req.params;
   let connection;
 
