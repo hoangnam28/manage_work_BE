@@ -55,7 +55,7 @@ const checkEditPermission = async (req, res, next) => {
   let connection;
   try {
     connection = await database.getConnection();
-    if (req.user.company_id !== '001507' ) {
+    if (req.user.company_id !== '001507' && req.user.company_id !== '021253') {
       return res.status(403).json({ message: 'Bạn không có quyền thực hiện thao tác này' });
     }
     next();
@@ -83,8 +83,10 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
               IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
               IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
               IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33, IMP_34, IMP_35,
-              NOTE as note
+              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
+              IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
+              IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
+              IMP_50, IMP_51, NOTE as note
        FROM impedances
        WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
        ORDER BY IMP_ID DESC`,
@@ -131,7 +133,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
     let placeholders = [':imp_id']; 
     
     // Process all possible impedance fields
-    for (let i = 1; i <= 35; i++) {
+    for (let i = 1; i <= 51; i++) {
       const reqField = `imp_${i}`; // Field name in request
       const dbField = `IMP_${i}`;  // Field name in database
       
@@ -162,7 +164,10 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
               IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
               IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
               IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33, IMP_34, IMP_35,
+              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
+              IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
+              IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
+              IMP_50, IMP_51,
               NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
@@ -176,7 +181,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
     
     // Add lowercase versions for compatibility
     const responseData = newRecord.rows[0];
-    for (let i = 1; i <= 35; i++) {
+    for (let i = 1; i <= 51; i++) {
       const upperField = `IMP_${i}`;
       const lowerField = `imp_${i}`;
       if (responseData[upperField]) {
@@ -242,7 +247,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
     }
     const updateFields = [];
     const bindParams = { imp_id: impId }; 
-    for (let i = 1; i <= 35; i++) {
+    for (let i = 1; i <= 51; i++) {
       const reqField = `imp_${i}`; 
       const dbField = `IMP_${i}`;  
       if (updateData[reqField] !== undefined && updateData[reqField] !== null) {
@@ -280,7 +285,10 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
               IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
               IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
               IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33, IMP_34, IMP_35,
+              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
+              IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
+              IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
+              IMP_50, IMP_51,
               NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
@@ -292,7 +300,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
       throw new Error('Failed to retrieve updated record');
     }
     const updatedData = updatedRecord.rows[0];
-    for (let i = 1; i <= 35; i++) {
+    for (let i = 1; i <= 51; i++) {
       const upperKey = `IMP_${i}`;
       const lowerKey = `imp_${i}`;
       if (updatedData[upperKey] !== undefined) {
