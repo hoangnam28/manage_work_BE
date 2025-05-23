@@ -31,7 +31,7 @@ const authenticateToken = (req, res, next) => {
 const checkUserPermission = async (req, res, next) => {
   let connection;
   try {
-    connection = await database.getConnection();    // Kiểm tra company_id từ token
+    connection = await database.getConnection();    
     if (req.user.company_id !== '001507' && req.user.company_id !== '021253') {
       return res.status(403).json({ message: 'Bạn không có quyền truy cập trang này' });
     }
@@ -125,17 +125,17 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
     );
     
     const nextId = idResult.rows[0].NEXT_ID;
-    console.log('Next ID:', nextId); // Changed from logDebug to console.log
+    console.log('Next ID:', nextId); 
 
     // Build SQL column and values list
-    let columns = ['IMP_ID']; // uppercase field names
-    let bindVars = { imp_id: nextId }; // lowercase bind variable names
+    let columns = ['IMP_ID'];
+    let bindVars = { imp_id: nextId }; 
     let placeholders = [':imp_id']; 
     
     // Process all possible impedance fields
     for (let i = 1; i <= 51; i++) {
-      const reqField = `imp_${i}`; // Field name in request
-      const dbField = `IMP_${i}`;  // Field name in database
+      const reqField = `imp_${i}`; 
+      const dbField = `IMP_${i}`; 
       
       if (data[reqField] !== undefined && data[reqField] !== null && data[reqField] !== '') {
         columns.push(dbField);
@@ -195,7 +195,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
     });
   } catch (err) {
     console.error('Error creating impedance:', err);
-    console.log('Error details:', { // Changed from logDebug to console.log
+    console.log('Error details:', { 
       message: err.message,
       stack: err.stack,
       code: err.code,
