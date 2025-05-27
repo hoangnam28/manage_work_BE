@@ -32,7 +32,7 @@ const checkUserPermission = async (req, res, next) => {
   let connection;
   try {
     connection = await database.getConnection();    
-    if (req.user.company_id !== '001507' && req.user.company_id !== '021253') {
+    if (req.user.company_id !== '001507' && req.user.company_id !== '021253' && req.user.company_id !== '000001') {
       return res.status(403).json({ message: 'Bạn không có quyền truy cập trang này' });
     }
     next();
