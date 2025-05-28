@@ -27,35 +27,13 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Middleware kiểm tra quyền admin
-const checkUserPermission = async (req, res, next) => {
-  let connection;
-  try {
-    connection = await database.getConnection();    
-    if (req.user.company_id !== '001507' && req.user.company_id !== '021253' && req.user.company_id !== '000001') {
-      return res.status(403).json({ message: 'Bạn không có quyền truy cập trang này' });
-    }
-    next();
-  } catch (error) {
-    console.error('Error checking admin permission:', error);
-    res.status(500).json({ message: 'Lỗi server' });
-  } finally {
-    if (connection) {
-      try {
-        await connection.close();
-      } catch (err) {
-        console.error('Error closing connection:', err);
-      }
-    }
-  }
-};
 
 // Middleware kiểm tra quyền chỉnh sửa
 const checkEditPermission = async (req, res, next) => {
   let connection;
   try {
     connection = await database.getConnection();
-    if (req.user.company_id !== '001507' && req.user.company_id !== '021253') {
+    if (req.user.company_id !== '001507' && req.user.company_id !== '021253' && req.user.company_id !== '000001') {
       return res.status(403).json({ message: 'Bạn không có quyền thực hiện thao tác này' });
     }
     next();
@@ -80,13 +58,23 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
     connection = await database.getConnection();
     const result = await connection.execute(
       `SELECT IMP_ID as imp_id,
-              IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
-              IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
-              IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
-              IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
-              IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
-              IMP_50, IMP_51, NOTE as note
+       IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
+       IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
+       IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25,
+       IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
+       IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
+       IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
+       IMP_50, IMP_51,
+       IMP_52, IMP_53, IMP_54, IMP_55, IMP_56, IMP_57, IMP_58, IMP_59,
+       IMP_60, IMP_61, IMP_62, IMP_63, IMP_64, IMP_65, IMP_66, IMP_67,
+       IMP_68, IMP_69, IMP_70, IMP_71, IMP_72, IMP_73, IMP_74, IMP_75,
+       IMP_76, IMP_77, IMP_78, IMP_79, IMP_80, IMP_81, IMP_82, IMP_83,
+       IMP_84, IMP_85, IMP_86, IMP_87, IMP_88, IMP_89, IMP_90, IMP_91,
+       IMP_92, IMP_93, IMP_94, IMP_95, IMP_96, IMP_97, IMP_98, IMP_99,
+       IMP_100, IMP_101, IMP_102, IMP_103, IMP_104, IMP_105, IMP_106, IMP_107,
+       IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
+       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121,
+       NOTE as note
        FROM impedances
        WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
        ORDER BY IMP_ID DESC`,
@@ -115,7 +103,7 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
 router.post('/create-impedance', authenticateToken, checkEditPermission, async (req, res) => {
   let connection;
   try {
-    
+
     const data = req.body;
     connection = await database.getConnection();
     const idResult = await connection.execute(
@@ -123,88 +111,97 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     const nextId = idResult.rows[0].NEXT_ID;
-    console.log('Next ID:', nextId); 
+    console.log('Next ID:', nextId);
 
     // Build SQL column and values list
     let columns = ['IMP_ID'];
-    let bindVars = { imp_id: nextId }; 
-    let placeholders = [':imp_id']; 
-    
+    let bindVars = { imp_id: nextId };
+    let placeholders = [':imp_id'];
+
     // Process all possible impedance fields
-    for (let i = 1; i <= 51; i++) {
-      const reqField = `imp_${i}`; 
-      const dbField = `IMP_${i}`; 
-      
+    for (let i = 1; i <= 121; i++) {
+      const reqField = `imp_${i}`;
+      const dbField = `IMP_${i}`;
+
       if (data[reqField] !== undefined && data[reqField] !== null && data[reqField] !== '') {
         columns.push(dbField);
         placeholders.push(`:${reqField}`);
         bindVars[reqField] = data[reqField].toString();
       }
     }
-    
+
     // Add note if provided
     if (data.note) {
       columns.push('NOTE');
       placeholders.push(':note');
       bindVars.note = data.note;
     }
-    
+
     // Construct and execute the insert query
     const insertQuery = `
       INSERT INTO impedances (${columns.join(', ')})
       VALUES (${placeholders.join(', ')})
     `;
-    
+
 
     await connection.execute(insertQuery, bindVars, { autoCommit: true });
     const newRecord = await connection.execute(
-      `SELECT IMP_ID as imp_id, 
-              IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
-              IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
-              IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
-              IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
-              IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
-              IMP_50, IMP_51,
-              NOTE as note
+      `SELECT IMP_ID as imp_id,
+       IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
+       IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
+       IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25,
+       IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
+       IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
+       IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
+       IMP_50, IMP_51,
+       IMP_52, IMP_53, IMP_54, IMP_55, IMP_56, IMP_57, IMP_58, IMP_59,
+       IMP_60, IMP_61, IMP_62, IMP_63, IMP_64, IMP_65, IMP_66, IMP_67,
+       IMP_68, IMP_69, IMP_70, IMP_71, IMP_72, IMP_73, IMP_74, IMP_75,
+       IMP_76, IMP_77, IMP_78, IMP_79, IMP_80, IMP_81, IMP_82, IMP_83,
+       IMP_84, IMP_85, IMP_86, IMP_87, IMP_88, IMP_89, IMP_90, IMP_91,
+       IMP_92, IMP_93, IMP_94, IMP_95, IMP_96, IMP_97, IMP_98, IMP_99,
+       IMP_100, IMP_101, IMP_102, IMP_103, IMP_104, IMP_105, IMP_106, IMP_107,
+       IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
+       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121,
+       NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
       { imp_id: nextId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     if (!newRecord.rows || newRecord.rows.length === 0) {
       throw new Error('Record was not created properly');
     }
-    
+
     // Add lowercase versions for compatibility
     const responseData = newRecord.rows[0];
-    for (let i = 1; i <= 51; i++) {
+    for (let i = 1; i <= 121; i++) {
       const upperField = `IMP_${i}`;
       const lowerField = `imp_${i}`;
       if (responseData[upperField]) {
         responseData[lowerField] = responseData[upperField];
       }
     }
-    
+
     res.json({
       message: 'Thêm mới thành công',
       data: responseData
     });
   } catch (err) {
     console.error('Error creating impedance:', err);
-    console.log('Error details:', { 
+    console.log('Error details:', {
       message: err.message,
       stack: err.stack,
       code: err.code,
       errorNum: err.errorNum,
       offset: err.offset
     });
-    
-    res.status(500).json({ 
-      message: 'Lỗi server', 
+
+    res.status(500).json({
+      message: 'Lỗi server',
       error: err.message,
       stack: err.stack
     });
@@ -238,59 +235,68 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
       { id: impId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     if (!checkRecord.rows[0] || checkRecord.rows[0].COUNT === 0) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: 'Không tìm thấy bản ghi',
         error: `Không tìm thấy bản ghi với ID ${impId}`
       });
     }
     const updateFields = [];
-    const bindParams = { imp_id: impId }; 
-    for (let i = 1; i <= 51; i++) {
-      const reqField = `imp_${i}`; 
-      const dbField = `IMP_${i}`;  
+    const bindParams = { imp_id: impId };
+    for (let i = 1; i <= 121; i++) {
+      const reqField = `imp_${i}`;
+      const dbField = `IMP_${i}`;
       if (updateData[reqField] !== undefined && updateData[reqField] !== null) {
         updateFields.push(`${dbField} = :${reqField}`);
         bindParams[reqField] = updateData[reqField].toString();
       }
     }
-    
-    
+
+
     if (updateData.note !== undefined && updateData.note !== null) {
       updateFields.push(`NOTE = :note`);
       bindParams.note = updateData.note;
     }
-    
-    
+
+
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có trường dữ liệu nào được cung cấp để cập nhật' });
     }
-    
-    
+
+
     const updateQuery = `
       UPDATE impedances 
       SET ${updateFields.join(', ')} 
       WHERE IMP_ID = :imp_id
     `;
-    
+
     const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
-    
+
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi với ID đã cung cấp' });
     }
 
     const updatedRecord = await connection.execute(
-      `SELECT IMP_ID as imp_id, 
-              IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
-              IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
-              IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25, 
-              IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
-              IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
-              IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
-              IMP_50, IMP_51,
-              NOTE as note
-       FROM impedances 
+      `SELECT IMP_ID AS imp_id,
+       IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
+       IMP_10, IMP_11, IMP_12, IMP_13, IMP_14, IMP_15, IMP_16, IMP_17,
+       IMP_18, IMP_19, IMP_20, IMP_21, IMP_22, IMP_23, IMP_24, IMP_25,
+       IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
+       IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
+       IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
+       IMP_50, IMP_51,
+       IMP_52, IMP_53, IMP_54, IMP_55, IMP_56, IMP_57, IMP_58, IMP_59,
+       IMP_60, IMP_61, IMP_62, IMP_63, IMP_64, IMP_65, IMP_66, IMP_67,
+       IMP_68, IMP_69, IMP_70, IMP_71, IMP_72, IMP_73, IMP_74, IMP_75,
+       IMP_76, IMP_77, IMP_78, IMP_79, IMP_80, IMP_81, IMP_82, IMP_83,
+       IMP_84, IMP_85, IMP_86, IMP_87, IMP_88, IMP_89, IMP_90, IMP_91,
+       IMP_92, IMP_93, IMP_94, IMP_95, IMP_96, IMP_97, IMP_98, IMP_99,
+       IMP_100, IMP_101, IMP_102, IMP_103, IMP_104, IMP_105, IMP_106, IMP_107,
+       IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
+       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121,
+       NOTE AS note
+       FROM impedances
        WHERE IMP_ID = :imp_id`,
       { imp_id: impId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -300,7 +306,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
       throw new Error('Failed to retrieve updated record');
     }
     const updatedData = updatedRecord.rows[0];
-    for (let i = 1; i <= 51; i++) {
+    for (let i = 1; i <= 121; i++) {
       const upperKey = `IMP_${i}`;
       const lowerKey = `imp_${i}`;
       if (updatedData[upperKey] !== undefined) {
@@ -316,7 +322,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
       message: 'Cập nhật thành công',
       data: updatedData
     };
-    
+
     res.json(response);
   } catch (err) {
     console.error('Error updating impedance:', err);
@@ -326,9 +332,9 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
       code: err.code,
       errorNum: err.errorNum,
     });
-    
-    res.status(500).json({ 
-      message: 'Lỗi server', 
+
+    res.status(500).json({
+      message: 'Lỗi server',
       error: err.message,
       stack: err.stack
     });
@@ -356,15 +362,15 @@ router.put('/soft-delete-impedance/:impId', authenticateToken, checkEditPermissi
     }
 
     connection = await database.getConnection();
-    
+
     const checkRecord = await connection.execute(
       `SELECT COUNT(*) as COUNT FROM impedances WHERE IMP_ID = :id`,
       { id: impId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     if (!checkRecord.rows[0] || checkRecord.rows[0].COUNT === 0) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: 'Không tìm thấy bản ghi',
         error: `Không tìm thấy bản ghi với ID ${impId}`
       });
@@ -386,8 +392,8 @@ router.put('/soft-delete-impedance/:impId', authenticateToken, checkEditPermissi
     });
   } catch (err) {
     console.error('Error soft deleting impedance:', err);
-    res.status(500).json({ 
-      message: 'Lỗi server', 
+    res.status(500).json({
+      message: 'Lỗi server',
       error: err.message
     });
   } finally {
