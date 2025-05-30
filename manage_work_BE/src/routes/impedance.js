@@ -73,7 +73,9 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
        IMP_92, IMP_93, IMP_94, IMP_95, IMP_96, IMP_97, IMP_98, IMP_99,
        IMP_100, IMP_101, IMP_102, IMP_103, IMP_104, IMP_105, IMP_106, IMP_107,
        IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
-       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121,
+       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
+       IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
+       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, 
        NOTE as note
        FROM impedances
        WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
@@ -121,7 +123,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
     let placeholders = [':imp_id'];
 
     // Process all possible impedance fields
-    for (let i = 1; i <= 121; i++) {
+    for (let i = 1; i <= 135; i++) {
       const reqField = `imp_${i}`;
       const dbField = `IMP_${i}`;
 
@@ -164,7 +166,9 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
        IMP_92, IMP_93, IMP_94, IMP_95, IMP_96, IMP_97, IMP_98, IMP_99,
        IMP_100, IMP_101, IMP_102, IMP_103, IMP_104, IMP_105, IMP_106, IMP_107,
        IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
-       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121,
+       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
+       IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
+       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, 
        NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
@@ -178,7 +182,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
 
     // Add lowercase versions for compatibility
     const responseData = newRecord.rows[0];
-    for (let i = 1; i <= 121; i++) {
+    for (let i = 1; i <= 135; i++) {
       const upperField = `IMP_${i}`;
       const lowerField = `imp_${i}`;
       if (responseData[upperField]) {
@@ -244,7 +248,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
     }
     const updateFields = [];
     const bindParams = { imp_id: impId };
-    for (let i = 1; i <= 121; i++) {
+    for (let i = 1; i <= 135; i++) {
       const reqField = `imp_${i}`;
       const dbField = `IMP_${i}`;
       if (updateData[reqField] !== undefined && updateData[reqField] !== null) {
@@ -294,7 +298,9 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
        IMP_92, IMP_93, IMP_94, IMP_95, IMP_96, IMP_97, IMP_98, IMP_99,
        IMP_100, IMP_101, IMP_102, IMP_103, IMP_104, IMP_105, IMP_106, IMP_107,
        IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
-       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121,
+       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
+       IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
+       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, 
        NOTE AS note
        FROM impedances
        WHERE IMP_ID = :imp_id`,
@@ -306,7 +312,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
       throw new Error('Failed to retrieve updated record');
     }
     const updatedData = updatedRecord.rows[0];
-    for (let i = 1; i <= 121; i++) {
+    for (let i = 1; i <= 135; i++) {
       const upperKey = `IMP_${i}`;
       const lowerKey = `imp_${i}`;
       if (updatedData[upperKey] !== undefined) {
