@@ -33,7 +33,7 @@ const checkEditPermission = async (req, res, next) => {
   let connection;
   try {
     connection = await database.getConnection();
-    if (req.user.company_id !== '001507' && req.user.company_id !== '021253' && req.user.company_id !== '000001') {
+    if (req.user.company_id !== '001507' && req.user.company_id !== '021253' && req.user.company_id !== '000001' && req.user.company_id !== '030783' && req.user.company_id !== '008048') {
       return res.status(403).json({ message: 'Bạn không có quyền thực hiện thao tác này' });
     }
     next();
@@ -289,18 +289,18 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
        IMP_26, IMP_27, IMP_28, IMP_29, IMP_30, IMP_31, IMP_32, IMP_33,
        IMP_34, IMP_35, IMP_36, IMP_37, IMP_38, IMP_39, IMP_40, IMP_41,
        IMP_42, IMP_43, IMP_44, IMP_45, IMP_46, IMP_47, IMP_48, IMP_49,
-       IMP_50, IMP_51,
-       IMP_52, IMP_53, IMP_54, IMP_55, IMP_56, IMP_57, IMP_58, IMP_59,
-       IMP_60, IMP_61, IMP_62, IMP_63, IMP_64, IMP_65, IMP_66, IMP_67,
-       IMP_68, IMP_69, IMP_70, IMP_71, IMP_72, IMP_73, IMP_74, IMP_75,
-       IMP_76, IMP_77, IMP_78, IMP_79, IMP_80, IMP_81, IMP_82, IMP_83,
-       IMP_84, IMP_85, IMP_86, IMP_87, IMP_88, IMP_89, IMP_90, IMP_91,
-       IMP_92, IMP_93, IMP_94, IMP_95, IMP_96, IMP_97, IMP_98, IMP_99,
-       IMP_100, IMP_101, IMP_102, IMP_103, IMP_104, IMP_105, IMP_106, IMP_107,
-       IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
-       IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
-       IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
-       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, 
+       IMP_50, IMP_51, IMP_52, IMP_53, IMP_54, IMP_55, IMP_56, IMP_57,
+       IMP_58, IMP_59, IMP_60, IMP_61, IMP_62, IMP_63, IMP_64, IMP_65,
+       IMP_66, IMP_67, IMP_68, IMP_69, IMP_70, IMP_71, IMP_72, IMP_73,
+       IMP_74, IMP_75, IMP_76, IMP_77, IMP_78, IMP_79, IMP_80, IMP_81,
+       IMP_82, IMP_83, IMP_84, IMP_85, IMP_86, IMP_87, IMP_88, IMP_89,
+       IMP_90, IMP_91, IMP_92, IMP_93, IMP_94, IMP_95, IMP_96, IMP_97,
+       IMP_98, IMP_99, IMP_100, IMP_101, IMP_102, IMP_103, IMP_104,
+       IMP_105, IMP_106, IMP_107, IMP_108, IMP_109, IMP_110, IMP_111,
+       IMP_112, IMP_113, IMP_114, IMP_115, IMP_116, IMP_117, IMP_118,
+       IMP_119, IMP_120, IMP_121, IMP_122, IMP_123, IMP_124, IMP_125,
+       IMP_126, IMP_127, IMP_128, IMP_129, IMP_130, IMP_131, IMP_132,
+       IMP_133, IMP_134, IMP_135,
        NOTE AS note
        FROM impedances
        WHERE IMP_ID = :imp_id`,
