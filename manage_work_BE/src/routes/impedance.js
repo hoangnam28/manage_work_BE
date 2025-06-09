@@ -56,6 +56,17 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
+    
+    // Lấy tổng số bản ghi
+    const countResult = await connection.execute(
+      `SELECT COUNT(*) as total FROM impedances WHERE IS_DELETED = 0 OR IS_DELETED IS NULL`,
+      {},
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    
+    const total = countResult.rows[0].TOTAL;
+    
+    // Lấy dữ liệu với phân trang
     const result = await connection.execute(
       `SELECT IMP_ID as imp_id,
        IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
@@ -81,9 +92,19 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
        WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
        ORDER BY IMP_ID DESC`,
       {},
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      { 
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+        maxRows: 1000 // Tăng giới hạn số hàng tối đa
+      }
     );
-    res.json(result.rows);
+    
+    // Đảm bảo result.rows là mảng
+    const rows = Array.isArray(result.rows) ? result.rows : [];
+    
+    res.json({
+      data: rows,
+      total: total
+    });
   } catch (err) {
     console.error('Error in /list-impedance route:', err);
     res.status(500).json({
@@ -401,6 +422,163 @@ router.put('/soft-delete-impedance/:impId', authenticateToken, checkEditPermissi
     res.status(500).json({
       message: 'Lỗi server',
       error: err.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+// Route xử lý import dữ liệu từ Excel
+router.post('/import-impedance', authenticateToken, checkEditPermission, async (req, res) => {
+  let connection;
+  try {
+    const { data } = req.body;
+    if (!Array.isArray(data) || data.length === 0) {
+      return res.status(400).json({ message: 'Dữ liệu không hợp lệ' });
+    }
+
+    connection = await database.getConnection();
+
+    // Get next IMP_ID using MAX + 1 instead of sequence
+    const idResult = await connection.execute(
+      'SELECT NVL(MAX(IMP_ID), 0) + 1 AS NEXT_ID FROM impedances',
+      {},
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    
+    console.log('ID Result:', idResult.rows[0]); // Debug log
+    
+    let nextId = Number(idResult.rows[0].NEXT_ID);
+    console.log('Next ID (before):', nextId); // Debug log
+    
+    // Đảm bảo nextId là số hợp lệ
+    if (isNaN(nextId)) {
+      nextId = 1;
+    }
+    console.log('Next ID (after):', nextId); // Debug log
+
+    let successCount = 0;
+    let errorCount = 0;
+    let errorRows = [];
+    let errorDetails = [];
+
+    for (let rowIndex = 0; rowIndex < data.length; rowIndex++) {
+      const record = data[rowIndex];
+      let columns = ['IMP_ID'];
+      let bindVars = { imp_id: nextId };
+      let placeholders = [':imp_id'];
+
+      try {
+        console.log('Processing row', rowIndex + 1, 'with ID:', nextId); // Debug log
+        // Process all possible impedance fields
+        for (let i = 1; i <= 135; i++) {
+          const key = `IMP_${i}`;
+          let value = record[key];
+
+          // Nếu giá trị là undefined, object, array, function => Bỏ qua
+          if (value === undefined || typeof value === 'object' || typeof value === 'function') {
+            continue;
+          }
+
+          // Nếu giá trị là null, hoặc chuỗi rỗng/gạch ngang/NaN/null => Set thành null
+          if (
+            value === null ||
+            (typeof value === 'string' && (value.trim() === '' || value.trim() === '-' || value.trim().toLowerCase() === 'nan' || value.trim().toLowerCase() === 'null'))
+          ) {
+            bindVars[key.toLowerCase()] = null;
+            columns.push(key);
+            placeholders.push(`:${key.toLowerCase()}`);
+            continue;
+          }
+
+          // Nếu là số, chuyển thành chuỗi
+          if (typeof value === 'number') {
+            if (Number.isFinite(value) && !isNaN(value)) {
+              bindVars[key.toLowerCase()] = value.toString();
+            } else {
+              bindVars[key.toLowerCase()] = null;
+            }
+            columns.push(key);
+            placeholders.push(`:${key.toLowerCase()}`);
+            continue;
+          }
+
+          // Nếu là chuỗi, giữ nguyên sau khi trim
+          if (typeof value === 'string') {
+            const trimmedValue = value.trim();
+            if (trimmedValue === '' || trimmedValue === '-' || trimmedValue.toLowerCase() === 'nan' || trimmedValue.toLowerCase() === 'null') {
+              bindVars[key.toLowerCase()] = null;
+            } else {
+              bindVars[key.toLowerCase()] = trimmedValue;
+            }
+            columns.push(key);
+            placeholders.push(`:${key.toLowerCase()}`);
+            continue;
+          }
+
+          // Nếu là kiểu dữ liệu khác => Set null
+          bindVars[key.toLowerCase()] = null;
+          columns.push(key);
+          placeholders.push(`:${key.toLowerCase()}`);
+        }
+
+        // Add note if provided
+        if (record.NOTE) {
+          columns.push('NOTE');
+          placeholders.push(':note');
+          bindVars.note = String(record.NOTE).trim();
+        }
+
+        // Add IS_DELETED with default value 0
+        columns.push('IS_DELETED');
+        placeholders.push(':is_deleted');
+        bindVars.is_deleted = 0;
+
+        // Construct and execute the insert query
+        const insertQuery = `
+          INSERT INTO impedances (${columns.join(', ')})
+          VALUES (${placeholders.join(', ')})
+        `;
+
+        console.log('Insert Query:', insertQuery); // Debug log
+        console.log('Bind Variables:', bindVars); // Debug log
+
+        await connection.execute(insertQuery, bindVars, { autoCommit: true });
+        nextId++;
+        successCount++;
+      } catch (insertError) {
+        errorCount++;
+        errorRows.push(rowIndex + 2);
+        errorDetails.push({
+          row: rowIndex + 2,
+          error: insertError.message
+        });
+        console.error('Error inserting record at row', rowIndex + 2, insertError);
+        continue;
+      }
+    }
+
+    console.log(`Import thành công ${successCount} dòng, lỗi ${errorCount} dòng`);
+    res.json({
+      success: true,
+      message: `Đã import thành công ${successCount} dòng, lỗi ${errorCount} dòng`,
+      successCount,
+      errorCount,
+      errorRows,
+      errorDetails
+    });
+
+  } catch (error) {
+    console.error('Error importing impedance data:', error);
+    res.status(500).json({ 
+      message: 'Lỗi khi import dữ liệu',
+      error: error.message 
     });
   } finally {
     if (connection) {
