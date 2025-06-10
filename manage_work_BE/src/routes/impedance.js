@@ -591,4 +591,59 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
   }
 });
 
+router.put('/bulk-delete-by-product/:productCode', authenticateToken, checkEditPermission, async (req, res) => {
+  const { productCode } = req.params;
+  let connection;
+
+  try {
+    if (!productCode || productCode === 'undefined' || productCode === 'null') {
+      return res.status(400).json({ message: 'Mã sản phẩm không hợp lệ' });
+    }
+
+    connection = await database.getConnection();
+
+    // Check if records exist
+    const checkRecords = await connection.execute(
+      `SELECT COUNT(*) as COUNT FROM impedances WHERE IMP_2 = :productCode AND (IS_DELETED = 0 OR IS_DELETED IS NULL)`,
+      { productCode },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (!checkRecords.rows[0] || checkRecords.rows[0].COUNT === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy dữ liệu cho mã sản phẩm này' });
+    }
+
+    // Perform soft delete
+    const result = await connection.execute(
+      `UPDATE impedances SET IS_DELETED = 1 WHERE IMP_2 = :productCode AND (IS_DELETED = 0 OR IS_DELETED IS NULL)`,
+      { productCode },
+      { autoCommit: true }
+    );
+
+    if (result.rowsAffected === 0) {
+      return res.status(404).json({ message: 'Không có dữ liệu nào được xóa' });
+    }
+
+    res.json({
+      message: 'Xóa thành công',
+      affectedRows: result.rowsAffected,
+      productCode
+    });
+  } catch (err) {
+    console.error('Error bulk deleting impedance:', err);
+    res.status(500).json({
+      message: 'Lỗi server',
+      error: err.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
 module.exports = router;
