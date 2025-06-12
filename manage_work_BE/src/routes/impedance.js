@@ -445,23 +445,21 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
 
     connection = await database.getConnection();
 
-    // Get next IMP_ID using MAX + 1 instead of sequence
     const idResult = await connection.execute(
       'SELECT NVL(MAX(IMP_ID), 0) + 1 AS NEXT_ID FROM impedances',
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
-    console.log('ID Result:', idResult.rows[0]); // Debug log
+
     
     let nextId = Number(idResult.rows[0].NEXT_ID);
-    console.log('Next ID (before):', nextId); // Debug log
+
     
     // Đảm bảo nextId là số hợp lệ
     if (isNaN(nextId)) {
       nextId = 1;
     }
-    console.log('Next ID (after):', nextId); // Debug log
+
 
     let successCount = 0;
     let errorCount = 0;
@@ -475,18 +473,15 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
       let placeholders = [':imp_id'];
 
       try {
-        console.log('Processing row', rowIndex + 1, 'with ID:', nextId); // Debug log
-        // Process all possible impedance fields
         for (let i = 1; i <= 135; i++) {
           const key = `IMP_${i}`;
           let value = record[key];
 
-          // Nếu giá trị là undefined, object, array, function => Bỏ qua
           if (value === undefined || typeof value === 'object' || typeof value === 'function') {
             continue;
           }
 
-          // Nếu giá trị là null, hoặc chuỗi rỗng/gạch ngang/NaN/null => Set thành null
+          // Xử lý giá trị null hoặc empty
           if (
             value === null ||
             (typeof value === 'string' && (value.trim() === '' || value.trim() === '-' || value.trim().toLowerCase() === 'nan' || value.trim().toLowerCase() === 'null'))
@@ -496,36 +491,51 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
             placeholders.push(`:${key.toLowerCase()}`);
             continue;
           }
-
-          // Nếu là số, chuyển thành chuỗi
-          if (typeof value === 'number') {
-            if (Number.isFinite(value) && !isNaN(value)) {
-              bindVars[key.toLowerCase()] = value.toString();
+          const needsFormatting = (
+            ((i >= 52 && i <= 121) && 
+             ![77, 90, 97].includes(i) && 
+             i !== 58) || 
+            (i >= 122 && i <= 135 && ![126, 129, 131].includes(i)) 
+          );
+          if (needsFormatting) {
+            if (typeof value === 'number') {
+              if (Number.isFinite(value) && !isNaN(value)) {
+                bindVars[key.toLowerCase()] = Number(value).toFixed(1).toString();
+              } else {
+                bindVars[key.toLowerCase()] = null;
+              }
+            } else if (typeof value === 'string') {
+              const numValue = parseFloat(value);
+              if (!isNaN(numValue)) {
+                bindVars[key.toLowerCase()] = numValue.toFixed(1).toString();
+              } else {
+                bindVars[key.toLowerCase()] = null;
+              }
             } else {
               bindVars[key.toLowerCase()] = null;
             }
-            columns.push(key);
-            placeholders.push(`:${key.toLowerCase()}`);
-            continue;
-          }
-
-          // Nếu là chuỗi, giữ nguyên sau khi trim
-          if (typeof value === 'string') {
-            const trimmedValue = value.trim();
-            if (trimmedValue === '' || trimmedValue === '-' || trimmedValue.toLowerCase() === 'nan' || trimmedValue.toLowerCase() === 'null') {
-              bindVars[key.toLowerCase()] = null;
+          } else {
+            if (typeof value === 'number') {
+              if (Number.isFinite(value) && !isNaN(value)) {
+                bindVars[key.toLowerCase()] = value.toString();
+              } else {
+                bindVars[key.toLowerCase()] = null;
+              }
+            } else if (typeof value === 'string') {
+              const trimmedValue = value.trim();
+              if (trimmedValue === '' || trimmedValue === '-' || trimmedValue.toLowerCase() === 'nan' || trimmedValue.toLowerCase() === 'null') {
+                bindVars[key.toLowerCase()] = null;
+              } else {
+                bindVars[key.toLowerCase()] = trimmedValue;
+              }
             } else {
-              bindVars[key.toLowerCase()] = trimmedValue;
+              bindVars[key.toLowerCase()] = null;
             }
-            columns.push(key);
-            placeholders.push(`:${key.toLowerCase()}`);
-            continue;
           }
-
-          // Nếu là kiểu dữ liệu khác => Set null
-          bindVars[key.toLowerCase()] = null;
+          
           columns.push(key);
           placeholders.push(`:${key.toLowerCase()}`);
+          continue;
         }
 
         // Add note if provided
@@ -546,8 +556,8 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
           VALUES (${placeholders.join(', ')})
         `;
 
-        console.log('Insert Query:', insertQuery); // Debug log
-        console.log('Bind Variables:', bindVars); // Debug log
+        // console.log('Insert Query:', insertQuery); // Debug log
+        // console.log('Bind Variables:', bindVars); // Debug log
 
         await connection.execute(insertQuery, bindVars, { autoCommit: true });
         nextId++;
@@ -564,14 +574,9 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
       }
     }
 
-    console.log(`Import thành công ${successCount} dòng, lỗi ${errorCount} dòng`);
     res.json({
       success: true,
       message: `Đã import thành công ${successCount} dòng, lỗi ${errorCount} dòng`,
-      successCount,
-      errorCount,
-      errorRows,
-      errorDetails
     });
 
   } catch (error) {
