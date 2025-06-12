@@ -441,16 +441,41 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
     const { data } = req.body;
     if (!Array.isArray(data) || data.length === 0) {
       return res.status(400).json({ message: 'Dữ liệu không hợp lệ' });
+    }    connection = await database.getConnection();
+
+    for (const record of data) {
+      if (!record.IMP_2) {
+        throw new Error('Mã hàng không được để trống');
+      }
+
+      let query = `SELECT COUNT(*) as COUNT FROM impedances 
+                  WHERE IMP_2 = :productCode 
+                  AND (IS_DELETED = 0 OR IS_DELETED IS NULL)`;
+      let params = { productCode: record.IMP_2 };
+      if (record.IMP_1 && record.IMP_1.trim() !== '') {
+        query += ` AND IMP_1 = :jobName`;
+        params.jobName = record.IMP_1.trim();
+      } else {
+        query += ` AND IMP_1 IS NULL`;
+      }
+
+      const checkDuplicate = await connection.execute(
+        query,
+        params,
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      if (checkDuplicate.rows[0].COUNT > 0) {
+        throw new Error(`Dữ liệu đã tồn tại cho Mã hàng: ${record.IMP_2}${record.IMP_1 ? ' và JobName: ' + record.IMP_1 : ''}`);
+      }
     }
 
-    connection = await database.getConnection();
-
+    // Lấy ID tiếp theo cho việc insert
     const idResult = await connection.execute(
       'SELECT NVL(MAX(IMP_ID), 0) + 1 AS NEXT_ID FROM impedances',
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-
     
     let nextId = Number(idResult.rows[0].NEXT_ID);
 
@@ -582,7 +607,7 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
   } catch (error) {
     console.error('Error importing impedance data:', error);
     res.status(500).json({ 
-      message: 'Lỗi khi import dữ liệu',
+      message: 'Dữ liệu bạn import đã tồn tại hoặc có lỗi trong quá trình import',
       error: error.message 
     });
   } finally {
