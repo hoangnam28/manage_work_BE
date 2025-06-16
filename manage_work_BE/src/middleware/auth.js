@@ -19,7 +19,6 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-// Middleware kiểm tra quyền chỉnh sửa
 const checkEditPermission = async (req, res, next) => {
   if (
       req.user.company_id !== '021253' && 
