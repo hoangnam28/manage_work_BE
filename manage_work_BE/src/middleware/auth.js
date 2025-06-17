@@ -1,7 +1,29 @@
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-// Middleware xác thực token
+const generateAccessToken = (user) => {
+  return jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '24h' });
+};
+
+const generateRefreshToken = (user) => {
+  return jwt.sign(user, process.env.JWT_SECRET, { expiresIn: '7d' });
+};
+
+const refreshAccessToken = (refreshToken) => {
+  try {
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+    const user = {
+      company_id: decoded.company_id
+    };
+    return {
+      accessToken: generateAccessToken(user),
+      refreshToken: generateRefreshToken(user)
+    };
+  } catch (error) {
+    throw new Error('Invalid refresh token');
+  }
+};
+
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -30,5 +52,8 @@ const checkEditPermission = async (req, res, next) => {
 
 module.exports = {
   authenticateToken,
-  checkEditPermission
+  checkEditPermission,
+  generateAccessToken,
+  generateRefreshToken,
+  refreshAccessToken
 };
