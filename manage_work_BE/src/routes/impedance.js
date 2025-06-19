@@ -563,26 +563,20 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
           continue;
         }
 
-        // Add note if provided
         if (record.NOTE) {
           columns.push('NOTE');
           placeholders.push(':note');
           bindVars.note = String(record.NOTE).trim();
         }
 
-        // Add IS_DELETED with default value 0
         columns.push('IS_DELETED');
         placeholders.push(':is_deleted');
         bindVars.is_deleted = 0;
 
-        // Construct and execute the insert query
         const insertQuery = `
           INSERT INTO impedances (${columns.join(', ')})
           VALUES (${placeholders.join(', ')})
         `;
-
-        // console.log('Insert Query:', insertQuery); // Debug log
-        // console.log('Bind Variables:', bindVars); // Debug log
 
         await connection.execute(insertQuery, bindVars, { autoCommit: true });
         nextId++;
