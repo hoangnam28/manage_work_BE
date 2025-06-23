@@ -77,11 +77,11 @@ router.get('/list', authenticateToken, async (req, res) => {
         data_source,
         filename
        FROM material_core
+       WHERE is_deleted = 0
        ORDER BY id DESC`,
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-
     res.json({
       data: result.rows
     });
@@ -110,17 +110,15 @@ router.post('/create', async (req, res) => {
     const top_foil_cu_weights = Array.isArray(data.top_foil_cu_weight) 
       ? data.top_foil_cu_weight 
       : [data.top_foil_cu_weight];
-
     const createdRecords = [];
-
     for (const weight of top_foil_cu_weights) {
       connection = await database.getConnection();
-
       // Get next ID from sequence
       const result = await connection.execute(
         `SELECT material_core_seq.NEXTVAL FROM DUAL`
       );
-      const nextId = result.rows[0][0];      const bindParams = {
+      const nextId = result.rows[0][0];
+      const bindParams = {
         id: nextId,
         requester_name: data.requester_name,
         request_date: data.request_date ? new Date(data.request_date) : null,
@@ -183,7 +181,8 @@ router.post('/create', async (req, res) => {
         df_55ghz: data.df_55ghz,
         is_hf: data.is_hf || 'FALSE',
         data_source: data.data_source,
-        filename: data.filename
+        filename: data.filename,
+        is_deleted: 0,
       };      await connection.execute(        
         `INSERT INTO material_core (
           id, requester_name, request_date, handler, 
@@ -212,7 +211,7 @@ router.post('/create', async (req, res) => {
           DK_45GHZ_, DF_45GHZ_,
           DK_50GHZ_, DF_50GHZ_,
           DK_55GHZ_, DF_55GHZ_,
-          is_hf, data_source, filename
+          is_hf, data_source, filename, is_deleted
         ) VALUES (
           :id, :requester_name, :request_date, :handler,
           :status, :complete_date, :vendor, :family,
@@ -240,20 +239,17 @@ router.post('/create', async (req, res) => {
           :dk_45ghz, :df_45ghz,
           :dk_50ghz, :df_50ghz,
           :dk_55ghz, :df_55ghz,
-          :is_hf, :data_source, :filename
+          :is_hf, :data_source, :filename, :is_deleted
         )`,
         bindParams,
         { autoCommit: true }
       );
-
       createdRecords.push({
         id: nextId,
         ...bindParams
       });
-
       await connection.close();
     }
-
     res.status(201).json({
       success: true,
       message: 'Material core(s) created successfully',
@@ -473,31 +469,29 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Xóa mềm material core
 router.delete('/delete/:id', authenticateToken, async (req, res) => {
-  const { id } = req.params;
+  let { id } = req.params;
   let connection;
-
   try {
-    if (!id) {
+    if (!id || isNaN(Number(id))) {
+      console.warn('Xóa mềm: id không hợp lệ:', id);
       return res.status(400).json({
         message: 'ID không hợp lệ'
       });
     }
-
+    id = Number(id); // Đảm bảo chỉ 1 id hợp lệ
     connection = await database.getConnection();
-
     const result = await connection.execute(
-      `DELETE FROM material_core WHERE id = :id`,
+      `UPDATE material_core SET is_deleted = 1 WHERE id = :id`,
       { id },
       { autoCommit: true }
     );
-
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
-
     res.json({
-      message: 'Xóa thành công',
+      message: 'Xóa mềm thành công',
       id: id
     });
   } catch (err) {
