@@ -107,20 +107,11 @@ router.post('/create', async (req, res) => {
   let connection;
   try {
     const data = req.body;
-    console.log('MaterialCore create req.body:', JSON.stringify(data));
-    // Đảm bảo cả hai trường là mảng và loại bỏ phần tử rỗng/null/undefined
-    let topArr = Array.isArray(data.top_foil_cu_weight) ? data.top_foil_cu_weight : [data.top_foil_cu_weight];
-    let botArr = Array.isArray(data.bot_foil_cu_weight) ? data.bot_foil_cu_weight : [data.bot_foil_cu_weight];
-    topArr = topArr.filter(x => x !== undefined && x !== null && x !== '');
-    botArr = botArr.filter(x => x !== undefined && x !== null && x !== '');
-    if (topArr.length !== botArr.length) {
-      return res.status(400).json({
-        success: false,
-        message: 'Số lượng giá trị Top/Bot Foil Cu Weight phải bằng nhau.'
-      });
-    }
+    const top_foil_cu_weights = Array.isArray(data.top_foil_cu_weight) 
+      ? data.top_foil_cu_weight 
+      : [data.top_foil_cu_weight];
     const createdRecords = [];
-    for (let i = 0; i < topArr.length; i++) {
+    for (const weight of top_foil_cu_weights) {
       connection = await database.getConnection();
       // Get next ID from sequence
       const result = await connection.execute(
@@ -141,8 +132,8 @@ router.post('/create', async (req, res) => {
         spec_thickness: data.spec_thickness,
         preference_class: data.preference_class,
         use_type: data.use_type,
-        top_foil_cu_weight: topArr[i],
-        bot_foil_cu_weight: botArr[i],
+        top_foil_cu_weight: weight,
+        bot_foil_cu_weight: data.bot_foil_cu_weight,
         tg_min: data.tg_min,
         tg_max: data.tg_max,
         center_glass: data.center_glass,
@@ -192,8 +183,7 @@ router.post('/create', async (req, res) => {
         data_source: data.data_source,
         filename: data.filename,
         is_deleted: 0,
-      };
-      await connection.execute(
+      };      await connection.execute(        
         `INSERT INTO material_core (
           id, requester_name, request_date, handler, 
           status, complete_date, vendor, family,
