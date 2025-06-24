@@ -4,6 +4,10 @@ const oracledb = require('oracledb');
 const database = require('../config/database');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
+const ExcelJS = require('exceljs');
+const path = require('path');
+const fs = require('fs');
+const AdmZip = require('adm-zip'); // Built-in alternative: archiver/yauzl
 
 const { authenticateToken, checkEditPermission } = require('../middleware/auth');
 
@@ -26,6 +30,7 @@ router.get('/list', authenticateToken, async (req, res) => {
         spec_thickness,
         preference_class,
         use_type,
+        rigid,
         top_foil_cu_weight,
         bot_foil_cu_weight,
         tg_min,
@@ -141,6 +146,7 @@ router.post('/create', async (req, res) => {
         spec_thickness: data.spec_thickness,
         preference_class: data.preference_class,
         use_type: data.use_type,
+        rigid: data.rigid || 'FALSE',
         top_foil_cu_weight: topArr[i],
         bot_foil_cu_weight: botArr[i],
         tg_min: data.tg_min,
@@ -198,7 +204,7 @@ router.post('/create', async (req, res) => {
           id, requester_name, request_date, handler, 
           status, complete_date, vendor, family,
           prepreg_count, nominal_thickness, spec_thickness,
-          preference_class, use_type, top_foil_cu_weight,
+          preference_class, use_type, rigid, top_foil_cu_weight,
           bot_foil_cu_weight, tg_min, tg_max, center_glass,
           DK_01G, DF_01G,
           DK_0_001GHZ_, DF_0_001GHZ_,
@@ -226,7 +232,7 @@ router.post('/create', async (req, res) => {
           :id, :requester_name, :request_date, :handler,
           :status, :complete_date, :vendor, :family,
           :prepreg_count, :nominal_thickness, :spec_thickness,
-          :preference_class, :use_type, :top_foil_cu_weight,
+          :preference_class, :use_type, :rigid, :top_foil_cu_weight,
           :bot_foil_cu_weight, :tg_min, :tg_max, :center_glass,
           :dk_01g, :df_01g,
           :dk_0_001ghz, :df_0_001ghz,
@@ -283,17 +289,10 @@ router.post('/create', async (req, res) => {
   }
 });
 
-// Cập nhật material core
 router.put('/update/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
   let connection;
-
-  console.log('Update request:', {
-    paramsId: id,
-    bodyId: updateData.id,
-    updateData: updateData
-  });
 
   try {
     if (!id) {
@@ -336,6 +335,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       spec_thickness: 'spec_thickness',
       preference_class: 'preference_class',
       use_type: 'use_type',
+      rigid: 'rigid',
       top_foil_cu_weight: 'top_foil_cu_weight',
       bot_foil_cu_weight: 'bot_foil_cu_weight',
       tg_min: 'tg_min',
@@ -518,5 +518,340 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
     }
   }
 });
+
+async function createBackupTemplate() {
+  console.log('Creating backup template...');
+  
+  const workbook = new ExcelJS.Workbook();
+  
+  // Tạo đủ 5 sheets để đảm bảo sheet[4] tồn tại
+  for (let i = 0; i < 5; i++) {
+    const worksheet = workbook.addWorksheet(`Sheet${i + 1}`);
+    
+    if (i === 4) { // Sheet thứ 5 (index 4)
+      // Tạo title row
+      worksheet.getCell('A1').value = 'Material Core Export Template';
+      worksheet.getCell('A1').font = { bold: true, size: 14 };
+      
+      // Tạo header row tại row 2
+      const headers = [
+        'STT', 'ID', 'Name', 'Description', 'Type', // A-E
+        'VENDOR', 'FAMILY', 'PREPREG_COUNT', 'NOMINAL_THICKNESS', 'SPEC_THICKNESS', // F-J
+        'PREFERENCE_CLASS', 'USE_TYPE', 'RIGID', 'TOP_FOIL_CU_WEIGHT', 'BOT_FOIL_CU_WEIGHT', // K-O
+        'TG_MIN', 'TG_MAX', 'CENTER_GLASS', 'DK_01G', 'DF_01G', // P-T
+        'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ', 'DK_0_02GHZ', // U-Y
+        'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ', // Z-AD
+        'DK_3GHZ', 'DF_3GHZ', 'DK_5GHZ', 'DF_5GHZ', 'DK_5GHZ_2', // AE-AI
+        'DF_5GHZ_2', 'DK_8GHZ', 'DF_8GHZ', 'DK_10GHZ', 'DF_10GHZ', // AJ-AN
+        'DK_15GHZ', 'DF_15GHZ', 'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ', // AO-AS
+        'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ', 'DK_30GHZ', 'DF_30GHZ', // AT-AX
+        'DK_35GHZ', 'DF_35GHZ', 'DK_40GHZ', 'DF_40GHZ', 'DK_45GHZ', // AY-BC
+        'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ' // BD-BH
+      ];
+      
+      // Ghi headers vào row 2
+      headers.forEach((header, index) => {
+        const cell = worksheet.getCell(2, index + 1);
+        cell.value = header;
+        cell.font = { bold: true };
+        cell.fill = {
+          type: 'pattern',
+          pattern: 'solid',
+          fgColor: { argb: 'FFE6E6FA' } // Light purple
+        };
+        cell.border = {
+          top: { style: 'thin' },
+          left: { style: 'thin' },
+          bottom: { style: 'thin' },
+          right: { style: 'thin' }
+        };
+      });
+      
+      // Thiết lập độ rộng cột
+      worksheet.getColumn('A').width = 5;  // STT
+      worksheet.getColumn('B').width = 10; // ID
+      worksheet.getColumn('C').width = 20; // Name
+      worksheet.getColumn('D').width = 30; // Description
+      worksheet.getColumn('E').width = 15; // Type
+      
+      // Các cột data chính (F-BH)
+      for (let col = 6; col <= headers.length; col++) {
+        worksheet.getColumn(col).width = 12;
+      }
+      
+      // Freeze panes
+      worksheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 2 }];
+      
+      // Thêm một vài dòng mẫu để test
+      worksheet.getCell('A3').value = 1;
+      worksheet.getCell('B3').value = 'SAMPLE001';
+      worksheet.getCell('C3').value = 'Sample Material';
+      worksheet.getCell('D3').value = 'This is a sample row';
+      worksheet.getCell('E3').value = 'Test';
+    }
+  }
+  
+  return workbook;
+}
+
+// Hàm kiểm tra và sửa lỗi template
+async function validateAndFixTemplate(originalPath) {
+  const backupPath = originalPath.replace(/\.(xlsx|xlsm)$/, '_backup.$1');
+  
+  try {
+    // Thử đọc file gốc
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(originalPath);
+    
+    // Kiểm tra các điều kiện cần thiết
+    const worksheet = workbook.worksheets[4];
+    if (!worksheet) {
+      throw new Error('Sheet thứ 5 không tồn tại');
+    }
+    
+    // Kiểm tra worksheet có thể ghi được không
+    try {
+      worksheet.getCell('A1').value = 'Test';
+      await workbook.xlsx.writeBuffer(); // Test write
+      console.log('Template file is valid');
+      return { workbook, isFixed: false, path: originalPath };
+    } catch (writeError) {
+      throw new Error('Cannot write to worksheet: ' + writeError.message);
+    }
+    
+  } catch (error) {
+    console.warn('Template validation failed:', error.message);
+    console.log('Creating backup template...');
+    
+    try {
+      // Tạo backup template
+      const backupWorkbook = await createBackupTemplate();
+      
+      // Lưu backup template
+      await backupWorkbook.xlsx.writeFile(backupPath);
+      console.log(`Backup template created: ${backupPath}`);
+      
+      return { workbook: backupWorkbook, isFixed: true, path: backupPath };
+    } catch (backupError) {
+      console.error('Failed to create backup template:', backupError);
+      throw new Error('Cannot create backup template: ' + backupError.message);
+    }
+  }
+}
+// Export route với xử lý lỗi thủ công
+router.post('/export', async (req, res) => {
+  try {
+    const data = req.body.data;
+    
+    if (!data || !Array.isArray(data)) {
+      return res.status(400).json({ message: 'Invalid data format' });
+    }
+
+    const originalTemplatePath = path.join(__dirname, '../public/template/TemplateMaterial.xlsm');
+    let templatePath = originalTemplatePath;
+    
+    // Kiểm tra file template tồn tại
+    if (!fs.existsSync(templatePath)) {
+      throw new Error('Template file not found');
+    }
+
+    let workbook = new ExcelJS.Workbook();
+    let useFixedTemplate = false;
+    
+    try {
+      // Thử đọc file template gốc
+      await workbook.xlsx.readFile(templatePath);
+      
+      // Kiểm tra sheet thứ 5
+      if (!workbook.worksheets[4]) {
+        throw new Error('Sheet 5 not found');
+      }
+      
+    } catch (readError) {
+      console.log('Template read failed, attempting manual fix...');
+      
+      try {
+        // Sử dụng hàm sửa lỗi thủ công
+        const fixedTemplatePath = await fixCorruptedExcelFile(originalTemplatePath);
+        
+        if (fixedTemplatePath !== originalTemplatePath) {
+          templatePath = fixedTemplatePath;
+          useFixedTemplate = true;
+        }
+        
+        // Thử đọc lại file đã sửa
+        workbook = new ExcelJS.Workbook();
+        await workbook.xlsx.readFile(templatePath);
+        
+        if (!workbook.worksheets[4]) {
+          throw new Error('Sheet 5 still not found after fix');
+        }
+        
+        console.log('Successfully loaded fixed template');
+        
+      } catch (fixError) {
+        console.error('Manual fix failed, creating new template...');
+        
+        // Tạo workbook hoàn toàn mới
+        workbook = await createCleanTemplate();
+      }
+    }
+
+    // Xử lý dữ liệu như bình thường
+    const worksheet = workbook.worksheets[4];
+    const startRow = 3;
+    
+    const safeCell = (v) => {
+      if (v === undefined || v === null) return '';
+      if (typeof v === 'object') return JSON.stringify(v);
+      return String(v);
+    };
+
+    // Ghi dữ liệu vào worksheet
+    data.forEach((row, idx) => {
+      try {
+        const excelRow = worksheet.getRow(startRow + idx);
+        
+        // Mapping dữ liệu (giữ nguyên như code gốc)
+        excelRow.getCell(6).value = safeCell(row.VENDOR || row.vendor);
+        excelRow.getCell(7).value = safeCell(row.FAMILY || row.family);
+        excelRow.getCell(8).value = safeCell(row.PREPREG_COUNT || row.prepreg_count);
+        excelRow.getCell(9).value = safeCell(row.NOMINAL_THICKNESS || row.nominal_thickness);
+        excelRow.getCell(10).value = safeCell(row.SPEC_THICKNESS || row.spec_thickness);
+        excelRow.getCell(11).value = safeCell(row.PREFERENCE_CLASS || row.preference_class);
+        excelRow.getCell(12).value = safeCell(row.USE_TYPE || row.use_type);
+        excelRow.getCell(13).value = safeCell(row.RIGID || row.rigid);
+        excelRow.getCell(14).value = safeCell(row.TOP_FOIL_CU_WEIGHT || row.top_foil_cu_weight);
+        excelRow.getCell(15).value = safeCell(row.BOT_FOIL_CU_WEIGHT || row.bot_foil_cu_weight);
+        excelRow.getCell(16).value = safeCell(row.TG_MIN || row.tg_min);
+        excelRow.getCell(17).value = safeCell(row.TG_MAX || row.tg_max);
+        excelRow.getCell(18).value = safeCell(row.CENTER_GLASS || row.center_glass);
+        excelRow.getCell(19).value = safeCell(row.DK_01G || row.dk_01g);
+        excelRow.getCell(20).value = safeCell(row.DF_01G || row.df_01g);
+        excelRow.getCell(21).value = safeCell(row.DK_0_001GHZ || row.dk_0_001ghz);
+        excelRow.getCell(22).value = safeCell(row.DF_0_001GHZ || row.df_0_001ghz);
+        excelRow.getCell(23).value = safeCell(row.DK_0_01GHZ || row.dk_0_01ghz);
+        excelRow.getCell(24).value = safeCell(row.DF_0_01GHZ || row.df_0_01ghz);
+        excelRow.getCell(25).value = safeCell(row.DK_0_02GHZ || row.dk_0_02ghz);
+        excelRow.getCell(26).value = safeCell(row.DF_0_02GHZ || row.df_0_02ghz);
+        excelRow.getCell(27).value = safeCell(row.DK_2GHZ || row.dk_2ghz);
+        excelRow.getCell(28).value = safeCell(row.DF_2GHZ || row.df_2ghz);
+        excelRow.getCell(29).value = safeCell(row.DK_2_45GHZ || row.dk_2_45ghz);
+        excelRow.getCell(30).value = safeCell(row.DF_2_45GHZ || row.df_2_45ghz);
+        excelRow.getCell(31).value = safeCell(row.DK_3GHZ || row.dk_3ghz);
+        excelRow.getCell(32).value = safeCell(row.DF_3GHZ || row.df_3ghz);
+        excelRow.getCell(33).value = safeCell(row.DK_5GHZ || row.dk_5ghz);
+        excelRow.getCell(34).value = safeCell(row.DF_5GHZ || row.df_5ghz);
+        excelRow.getCell(35).value = safeCell(row.DK_5GHZ__ || row.dk_5ghz_2);
+        excelRow.getCell(36).value = safeCell(row.DF_5GHZ__ || row.df_5ghz_2);
+        excelRow.getCell(37).value = safeCell(row.DK_8GHZ || row.dk_8ghz);
+        excelRow.getCell(38).value = safeCell(row.DF_8GHZ || row.df_8ghz);
+        excelRow.getCell(39).value = safeCell(row.DK_10GHZ || row.dk_10ghz);
+        excelRow.getCell(40).value = safeCell(row.DF_10GHZ || row.df_10ghz);
+        excelRow.getCell(41).value = safeCell(row.DK_15GHZ || row.dk_15ghz);
+        excelRow.getCell(42).value = safeCell(row.DF_15GHZ || row.df_15ghz);
+        excelRow.getCell(43).value = safeCell(row.DK_16GHZ || row.dk_16ghz);
+        excelRow.getCell(44).value = safeCell(row.DF_16GHZ || row.df_16ghz);
+        excelRow.getCell(45).value = safeCell(row.DK_20GHZ || row.dk_20ghz);
+        excelRow.getCell(46).value = safeCell(row.DF_20GHZ || row.df_20ghz);
+        excelRow.getCell(47).value = safeCell(row.DK_25GHZ || row.dk_25ghz);
+        excelRow.getCell(48).value = safeCell(row.DF_25GHZ || row.df_25ghz);
+        excelRow.getCell(49).value = safeCell(row.DK_30GHZ || row.dk_30ghz);
+        excelRow.getCell(50).value = safeCell(row.DF_30GHZ || row.df_30ghz);
+        excelRow.getCell(51).value = safeCell(row.DK_35GHZ__ || row.dk_35ghz);
+        excelRow.getCell(52).value = safeCell(row.DF_35GHZ__ || row.df_35ghz);
+        excelRow.getCell(53).value = safeCell(row.DK_40GHZ || row.dk_40ghz);
+        excelRow.getCell(54).value = safeCell(row.DF_40GHZ || row.df_40ghz);
+        excelRow.getCell(55).value = safeCell(row.DK_45GHZ || row.dk_45ghz);
+        excelRow.getCell(56).value = safeCell(row.DF_45GHZ || row.df_45ghz);
+        excelRow.getCell(57).value = safeCell(row.DK_50GHZ || row.dk_50ghz);
+        excelRow.getCell(58).value = safeCell(row.DF_50GHZ || row.df_50ghz);
+        excelRow.getCell(59).value = safeCell(row.DK_55GHZ || row.dk_55ghz);
+        excelRow.getCell(60).value = safeCell(row.DF_55GHZ || row.df_55ghz);
+        
+        excelRow.commit();
+      } catch (rowError) {
+        console.error(`Error processing row ${idx}:`, rowError.message);
+      }
+    });
+
+    // Tạo buffer và trả về
+    const buffer = await workbook.xlsx.writeBuffer();
+    
+    // Cleanup: xóa file tạm nếu đã tạo
+    if (useFixedTemplate && templatePath !== originalTemplatePath) {
+      try {
+        fs.unlinkSync(templatePath);
+      } catch (cleanupError) {
+        console.warn('Could not cleanup temp file:', cleanupError.message);
+      }
+    }
+    
+    const filename = useFixedTemplate ? 'MaterialCoreExport_Fixed.xlsx' : 'MaterialCoreExport.xlsm';
+    const contentType = useFixedTemplate ? 
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' :
+      'application/vnd.ms-excel.sheet.macroEnabled.12';
+    
+    res.setHeader('Content-Disposition', `attachment; filename=${filename}`);
+    res.setHeader('Content-Type', contentType);
+    res.send(buffer);
+
+  } catch (err) {
+    console.error('Export error:', err);
+    res.status(500).json({ 
+      message: 'Export failed', 
+      error: err.message,
+      suggestion: 'Template file có thể bị lỗi. Hãy thử tạo lại template hoặc chuyển sang định dạng .xlsx'
+    });
+  }
+});
+
+// Hàm tạo template sạch hoàn toàn mới
+async function createCleanTemplate() {
+  const workbook = new ExcelJS.Workbook();
+  
+  // Tạo 5 sheets
+  for (let i = 0; i < 5; i++) {
+    const worksheet = workbook.addWorksheet(`Sheet${i + 1}`);
+    
+    if (i === 4) { // Sheet thứ 5
+      // Tạo header row
+      const headers = [
+        '', '', '', '', '', // A-E trống
+        'VENDOR', 'FAMILY', 'PREPREG_COUNT', 'NOMINAL_THICKNESS', 'SPEC_THICKNESS',
+        'PREFERENCE_CLASS', 'USE_TYPE', 'RIGID', 'TOP_FOIL_CU_WEIGHT', 'BOT_FOIL_CU_WEIGHT',
+        'TG_MIN', 'TG_MAX', 'CENTER_GLASS', 'DK_01G', 'DF_01G',
+        'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ', 'DK_0_02GHZ',
+        'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ',
+        'DK_3GHZ', 'DF_3GHZ', 'DK_5GHZ', 'DF_5GHZ', 'DK_5GHZ_2',
+        'DF_5GHZ_2', 'DK_8GHZ', 'DF_8GHZ', 'DK_10GHZ', 'DF_10GHZ',
+        'DK_15GHZ', 'DF_15GHZ', 'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ',
+        'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ', 'DK_30GHZ', 'DF_30GHZ',
+        'DK_35GHZ', 'DF_35GHZ', 'DK_40GHZ', 'DF_40GHZ', 'DK_45GHZ',
+        'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ'
+      ];
+      
+      headers.forEach((header, index) => {
+        if (header) {
+          const cell = worksheet.getCell(2, index + 1);
+          cell.value = header;
+          cell.font = { bold: true };
+          cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FFCCCCCC' }
+          };
+        }
+      });
+      
+      // Đặt độ rộng cột
+      for (let col = 6; col <= 60; col++) {
+        worksheet.getColumn(col).width = 12;
+      }
+    }
+  }
+  
+  return workbook;
+}
 
 module.exports = router;
