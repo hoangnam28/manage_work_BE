@@ -4,6 +4,7 @@ const oracledb = require('oracledb');
 const database = require('../config/database');
 require('dotenv').config();
 const jwt = require('jsonwebtoken');
+const { refreshAccessToken } = require('../middleware/auth');
 
 router.post('/login', async (req, res) => {
   const { company_id, password_hash } = req.body; 
@@ -36,26 +37,20 @@ router.post('/login', async (req, res) => {
     }
 
     // Generate token and complete login
-    const token = jwt.sign(
-      { 
-        username: user.USERNAME,
-        userId: user.USER_ID,
-        company_id: user.COMPANY_ID.trim(),
-        role: user.ROLE
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    const userPayload = {
+      username: user.USERNAME,
+      userId: user.USER_ID,
+      company_id: user.COMPANY_ID.trim(),
+      role: user.ROLE
+    };
+    const accessToken = jwt.sign(userPayload, process.env.JWT_SECRET, { expiresIn: '24h' });
+    const refreshToken = jwt.sign(userPayload, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
 
     res.json({
       message: 'Đăng nhập thành công',
-      accessToken: token,
-      user: {
-        username: user.USERNAME,
-        userId: user.USER_ID,
-        company_id: user.COMPANY_ID.trim(),
-        role: user.ROLE
-      }
+      accessToken,
+      refreshToken,
+      user: userPayload
     });
   } catch (error) {
     console.error('Error during login:', error);
@@ -149,6 +144,22 @@ router.get('/profile', authenticateToken, async (req, res) => {
         console.error('Error closing connection:', err);
       }
     }
+  }
+});
+
+router.post('/refresh', (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    
+    if (!refreshToken) {
+      return res.status(401).json({ message: 'Refresh token không được cung cấp' });
+    }
+    
+    const tokens = refreshAccessToken(refreshToken);
+    res.json(tokens);
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    res.status(403).json({ message: 'Refresh token không hợp lệ' });
   }
 });
 
