@@ -39,7 +39,7 @@ router.post('/add', async (req, res) => {
         ma, 
         khach_hang, 
         ma_tai_lieu,
-        doi_tuong, // Truyền giá trị doi_tuong (có thể là null)
+        doi_tuong, 
         created_by
       },
       { autoCommit: true }

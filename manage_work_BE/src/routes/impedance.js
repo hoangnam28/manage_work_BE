@@ -505,8 +505,6 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
           if (value === undefined || typeof value === 'object' || typeof value === 'function') {
             continue;
           }
-
-          // Xử lý giá trị null hoặc empty
           if (
             value === null ||
             (typeof value === 'string' && (value.trim() === '' || value.trim().toLowerCase() === 'nan' || value.trim().toLowerCase() === 'null'))
