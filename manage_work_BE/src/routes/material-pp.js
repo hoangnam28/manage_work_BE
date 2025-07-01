@@ -281,9 +281,9 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       complete_date: 'complete_date',
       vendor: 'vendor',
       family: 'family',
-      prepreg_count: 'prepreg_count',
-      nominal_thickness: 'nominal_thickness',
-      spec_thickness: 'spec_thickness',
+      glass_style: 'glass_style',
+      resin_percentage: 'resin_percentage',
+      rav_thickness: 'rav_thickness',
       preference_class: 'preference_class',
       use_type: 'use_type',
       tg_min: 'tg_min',
@@ -337,9 +337,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       return isNaN(num) ? null : num;
     };
 
-    const integerFields = ['id', 'prepreg_count', 'preference_class', 'tg_min', 'tg_max'];
+    const integerFields = ['id', 'resin_percentage', 'preference_class', 'tg_min', 'tg_max'];
     const numericPrecisionFields = [
-      'nominal_thickness', 'spec_thickness',
       'dk_01g', 'df_01g',
       'dk_0_001ghz', 'df_0_001ghz',
       'dk_0_01ghz', 'df_0_01ghz',
