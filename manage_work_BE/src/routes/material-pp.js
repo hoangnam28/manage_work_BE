@@ -99,13 +99,17 @@ router.post('/create', async (req, res) => {
   let connection;
   try {
     const data = req.body;
-    const top_foil_cu_weights = Array.isArray(data.top_foil_cu_weight)
-      ? data.top_foil_cu_weight
-      : [data.top_foil_cu_weight];
-    const createdRecords = [];
-    for (const weight of top_foil_cu_weights) {
+     let resinArr = [];
+    if (typeof data.resin_percentage === 'string') {
+      resinArr = data.resin_percentage.split(',').map(v => Number(v.trim())).filter(v => !isNaN(v));
+    } else if (Array.isArray(data.resin_percentage)) {
+      resinArr = data.resin_percentage.map(v => Number(v)).filter(v => !isNaN(v));
+    } else {
+      resinArr = [Number(data.resin_percentage)];
+    }
+     const createdRecords = [];
+    for (const resin of resinArr) {
       connection = await database.getConnection();
-      // Get next ID from sequence
       const result = await connection.execute(
         `SELECT material_properties_seq.NEXTVAL FROM DUAL`
       );
@@ -120,6 +124,7 @@ router.post('/create', async (req, res) => {
         vendor: data.vendor,
         family: data.family,
         glass_style: data.glass_style,
+        resin_percentage: data.resin_percentage,
         rav_thickness: data.rav_thickness,
         preference_class: data.preference_class,
         use_type: data.use_type,
@@ -170,7 +175,7 @@ router.post('/create', async (req, res) => {
         `INSERT INTO material_properties (
     id, name, request_date, handler, 
     status, complete_date, vendor, family,
-    glass_style, rav_thickness,
+    glass_style,resin_percentage, rav_thickness, 
     preference_class, use_type, tg_min, tg_max, 
     DK_01G, DF_01G,
     DK_0_001GHZ_, DF_0_001GHZ_,
@@ -194,7 +199,7 @@ router.post('/create', async (req, res) => {
   ) VALUES (
     :id, :name, :request_date, :handler,
     :status, :complete_date, :vendor, :family,
-    :glass_style, :rav_thickness, :preference_class, :use_type, 
+    :glass_style,:resin_percentage, :rav_thickness, :preference_class, :use_type, 
     :tg_min, :tg_max, 
     :dk_01g, :df_01g,
     :dk_0_001ghz, :df_0_001ghz,
