@@ -116,7 +116,7 @@ router.post('/create', async (req, res) => {
     const subject = `Yêu cầu xác nhận sử dụng bo to của mã hàng: ${customer_part_number}`;
     const html = `
    
-  <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
     <tr>
       <th align="left">Mã sản phẩm</th>
       <td>${customer_part_number}</td>
@@ -148,10 +148,10 @@ router.post('/create', async (req, res) => {
     <tr>
       <th align="left" colspan="2" style="color:#d48806;">Yêu cầu xác nhận sử dụng bo to!</th>
     </tr>
-  </table>
-  <br>
-  <a href="${feUrl}">Xem chi tiết mã hàng cần xác nhận</a><br>
-   <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b>
+    </table>
+    <br>
+    <a href="${feUrl}">Xem chi tiết mã hàng cần xác nhận</a><br>
+    <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b>
     <b>This is an automated email sent from the system. Please do not reply to all - Thank you!</b>
 `;
     sendMail(subject, html).catch(console.error);
@@ -236,7 +236,7 @@ router.put('/update/:id', async (req, res) => {
       const feUrl = `http://192.84.105.173:4000/decide-board/${id}`;
       const subject = `Đã xác nhận yêu cầu sử dụng bo to của mã hàng: ${row.CUSTOMER_CODE || customer_code || ''}`;
       const html = `
-  <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
     <tr>
       <th align="left">Mã sản phẩm</th>
       <td> ${row.CUSTOMER_CODE || customer_code || ''}</td>
@@ -273,10 +273,10 @@ router.put('/update/:id', async (req, res) => {
       <th align="left">Xác nhận ngày</th>
       <td>${new Date().toLocaleString()}</td>
     </tr>  
-  </table>
-  <br>
+    </table>
+    <br>
     <a href="${feUrl}">Xem chi tiết mã hàng cần xác nhận</a><br>
-   <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b>
+    <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b>
     <b>This is an automated email sent from the system. Please do not reply to all - Thank you!</b>
 `;
       sendMail(subject, html).catch(console.error);
