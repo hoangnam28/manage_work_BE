@@ -33,7 +33,7 @@ Promise.all([
   database2.initialize()
 ])
   .then(() => {
-    console.log('Cả hai database đã được khởi tạo thành công');
+    console.log('Both database initalize succesfully!');
   })
   .catch(err => {
     console.error('Lỗi khởi tạo database:', err);
@@ -48,9 +48,9 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.use('/api/impedance', impedanceRoutes);
 
-app.use('/api/user', userRoutes); // Add user management routes
+app.use('/api/user', userRoutes); 
 
-app.use('/api/material-core', materialCoreRoutes); // Add material core routes
+app.use('/api/material-core', materialCoreRoutes); 
 
 app.use('/api/material-pp', materialPPRoutes);
 
