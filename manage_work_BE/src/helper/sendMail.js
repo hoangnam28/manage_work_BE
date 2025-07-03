@@ -10,10 +10,11 @@ async function sendMail(subject, html) {
     });
 
     const mailOptions = {
-        from: 'mkvc.document-managementsystem@meiko-elec.com',
+        from: 'mkvc.board_large_size_system@meiko-elec.com',
         to: [
             'thanh.vutien@meiko-elec.com',
-            'nam.nguyenhoang@meiko-elec.com'
+            'nam.nguyenhoang@meiko-elec.com',
+            'trang.nguyenkieu@meiko-elec.com'
         ],
         subject,
         html,
