@@ -2,12 +2,14 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const database = require('./config/database');
-const authRoutes = require('./routes/auth');  
+const database2 = require('./config/database_2');
+const authRoutes = require('./routes/auth');
 const documentationRoutes = require('./routes/document');
-const impedanceRoutes = require('./routes/impedance'); // New route for Impedance
-const userRoutes = require('./routes/user'); // New route for User Management
-const materialCoreRoutes = require('./routes/material-core'); // New route for Material Core
+const impedanceRoutes = require('./routes/impedance');
+const userRoutes = require('./routes/user');
+const materialCoreRoutes = require('./routes/material-core');
 const materialPPRoutes = require('./routes/material-pp');
+const largeSize = require('./routes/large-size');
 const path = require('path');
 const fs = require('fs');
 const app = express();
@@ -23,15 +25,18 @@ app.use(cors({
   }
 }));
 
-app.use(bodyParser.json({limit: '50mb'}));
+app.use(bodyParser.json({ limit: '50mb' }));
 app.use(bodyParser.urlencoded({ extended: true, limit: '50mb' }));
 
-database.initialize()
+Promise.all([
+  database.initialize(),
+  database2.initialize()
+])
   .then(() => {
-    console.log('Database initialized successfully');
+    console.log('Cả hai database đã được khởi tạo thành công');
   })
   .catch(err => {
-    console.error('Failed to initialize database:', err);
+    console.error('Lỗi khởi tạo database:', err);
     process.exit(1);
   });
 
@@ -49,14 +54,17 @@ app.use('/api/material-core', materialCoreRoutes); // Add material core routes
 
 app.use('/api/material-pp', materialPPRoutes);
 
+app.use('/api/large-size', largeSize);
+
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
 
 process.on('SIGINT', async () => {
-  try { 
+  try {
     await database.closePool();
+    await database2.closePool();
     process.exit(0);
   } catch (err) {
     process.exit(1);
