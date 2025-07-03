@@ -112,11 +112,10 @@ router.post('/create', async (req, res) => {
     );
 
     // Gửi mail thông báo yêu cầu xác nhận
+    const feUrl = `http://192.84.105.173:4000/decide-board/${nextId}`;
     const subject = `Yêu cầu xác nhận sử dụng bo to của mã hàng: ${customer_part_number}`;
     const html = `
-    <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b><br>
-    <b style="color:gray;">This is an automated email sent from the system. Please do not reply to all - Thank you!</b><br>
-    <br>
+   
   <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
     <tr>
       <th align="left">Mã sản phẩm</th>
@@ -151,7 +150,9 @@ router.post('/create', async (req, res) => {
     </tr>
   </table>
   <br>
-  <b style="color:red;">Have a nice day ^_^!</b>
+  <a href="${feUrl}">Xem chi tiết mã hàng cần xác nhận</a><br>
+   <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b>
+    <b>This is an automated email sent from the system. Please do not reply to all - Thank you!</b>
 `;
     sendMail(subject, html).catch(console.error);
 
@@ -232,11 +233,9 @@ router.put('/update/:id', async (req, res) => {
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
       const row = result.rows[0] || {};
+      const feUrl = `http://192.84.105.173:4000/decide-board/${id}`;
       const subject = `Đã xác nhận yêu cầu sử dụng bo to của mã hàng: ${row.CUSTOMER_CODE || customer_code || ''}`;
       const html = `
-       <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b><br>
-      <b style="color:gray;">This is an automated email sent from the system. Please do not reply to all - Thank you!</b><br>
-      <br>
   <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
     <tr>
       <th align="left">Mã sản phẩm</th>
@@ -276,7 +275,9 @@ router.put('/update/:id', async (req, res) => {
     </tr>  
   </table>
   <br>
-  <b style="color:red;">Have a nice day ^_^!</b>
+    <a href="${feUrl}">Xem chi tiết mã hàng cần xác nhận</a><br>
+   <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b>
+    <b>This is an automated email sent from the system. Please do not reply to all - Thank you!</b>
 `;
       sendMail(subject, html).catch(console.error);
     }
@@ -326,6 +327,27 @@ router.delete('/delete/:id', async (req, res) => {
         console.error('Error closing connection:', err);
       }
     }
+  }
+});
+
+router.get('/detail/:id', async (req, res) => {
+  let connection;
+  try {
+    const { id } = req.params;
+    connection = await database.getConnection();
+    const result = await connection.execute(
+      `SELECT * FROM large_size WHERE id = :id AND is_deleted = 0`,
+      { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Không tìm thấy mã hàng' });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
   }
 });
 
