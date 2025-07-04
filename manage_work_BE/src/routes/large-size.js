@@ -29,8 +29,6 @@ router.get('/customers', async (req, res) => {
       }
     );
 
-    console.log(`Total customers fetched: ${result.rows.length}`);
-
     const uniqueCustomers = [...new Set(
       result.rows
         .map(row => (row.CUSTOMER_PART_NUMBER || '').trim())
@@ -143,7 +141,6 @@ router.post('/create', async (req, res) => {
     </tr>
     <tr>
       <th align="left">Yêu cầu sử dụng bo to</th>
-      <td>${request === 'TRUE' ? 'Có' : request === 'FALSE' ? 'Không' : request}</td>
     </tr>
     <tr>
       <th align="left">Ghi chú</th>
@@ -193,8 +190,13 @@ router.put('/update/:id', async (req, res) => {
       fields.push('confirm_by = :confirm_by');
       binds.confirm_by = confirm_by;
 
-      fields.push('request = :request');
-      binds.request = 'TRUE';
+      if (typeof request !== 'undefined') {
+        fields.push('request = :request');
+        binds.request = request;
+      } else {
+        fields.push('request = :request');
+        binds.request = 'TRUE';
+      }
     }
     if (typeof type_board !== 'undefined') {
       fields.push('type_board = :type_board');
@@ -234,12 +236,13 @@ router.put('/update/:id', async (req, res) => {
     if (typeof confirm_by !== 'undefined') {
       // Lấy lại thông tin mã hàng để gửi mail đầy đủ
       const result = await connection.execute(
-        `SELECT customer_code, type_board, size_normal, rate_normal, size_big, rate_big, note FROM large_size WHERE id = :id`,
+        `SELECT customer_code, type_board, size_normal, rate_normal, size_big, rate_big, note, request FROM large_size WHERE id = :id`,
         { id },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
       const row = result.rows[0] || {};
       const feUrl = `http://192.84.105.173:4000/decide-board/${id}`;
+      const isUseLarge = (row.REQUEST || request) === 'TRUE';
       const subject = `Đã xác nhận yêu cầu sử dụng bo to của mã hàng: ${row.CUSTOMER_CODE || customer_code || ''}`;
       const html = `
     <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
@@ -276,12 +279,16 @@ router.put('/update/:id', async (req, res) => {
       <td>${new Date().toLocaleString()}</td>
     </tr>
     <tr>
+      <th align="left">Yêu cầu sử dụng bo to</th>
+      <td>${isUseLarge ? 'Có' : 'Không'}</td>
+    </tr>
+    <tr>
       <th align="left">Ghi chú</th>
       <td>${row.NOTE || note || ''}</td>
     </tr>  
     </table>
     <br>
-    <a href="${feUrl}">Link Xem chi tiết mã hàng cần xác nhận</a>
+    <a href="${feUrl}">Link Xem chi tiết mã hàng đã xác nhận</a>
     <br>
     <br>
     <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
