@@ -142,6 +142,10 @@ router.post('/create', async (req, res) => {
       <td>${rate_big}</td>
     </tr>
     <tr>
+      <th align="left">Yêu cầu sử dụng bo to</th>
+      <td>${request === 'TRUE' ? 'Có' : request === 'FALSE' ? 'Không' : request}</td>
+    </tr>
+    <tr>
       <th align="left">Ghi chú</th>
       <td>${note}</td>
     </tr>
@@ -150,9 +154,11 @@ router.post('/create', async (req, res) => {
     </tr>
     </table>
     <br>
-    <a href="${feUrl}">Xem chi tiết mã hàng cần xác nhận</a><br>
-    <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b>
-    <b>This is an automated email sent from the system. Please do not reply to all - Thank you!</b>
+    <a href="${feUrl}">Link Xem chi tiết mã hàng cần xác nhận</a>
+    <br>
+    <br>
+    <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
+    <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
 `;
     sendMail(subject, html).catch(console.error);
 
@@ -262,22 +268,24 @@ router.put('/update/:id', async (req, res) => {
       <td>${row.RATE_BIG || rate_big || ''}</td>
     </tr>
     <tr>
-      <th align="left">Ghi chú</th>
-      <td>${row.NOTE || note || ''}</td>
-    </tr>
-    <tr>
       <th align="left">Người xác nhận</th>
       <td>${confirm_by}</td>
     </tr>
     <tr>
       <th align="left">Xác nhận ngày</th>
       <td>${new Date().toLocaleString()}</td>
+    </tr>
+    <tr>
+      <th align="left">Ghi chú</th>
+      <td>${row.NOTE || note || ''}</td>
     </tr>  
     </table>
     <br>
-    <a href="${feUrl}">Xem chi tiết mã hàng cần xác nhận</a><br>
-    <b>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</b>
-    <b>This is an automated email sent from the system. Please do not reply to all - Thank you!</b>
+    <a href="${feUrl}">Link Xem chi tiết mã hàng cần xác nhận</a>
+    <br>
+    <br>
+    <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
+    <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
 `;
       sendMail(subject, html).catch(console.error);
     }
