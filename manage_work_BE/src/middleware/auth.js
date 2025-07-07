@@ -20,8 +20,11 @@ const refreshAccessToken = (refreshToken) => {
       username: decoded.username,
       userId: decoded.userId,
       company_id: decoded.company_id,
-      role: decoded.role
+      role: decoded.role,
+      email: decoded.email
     };
+    console.log('User email:', user.email);
+    console.log('Payload:', user);
     return {
       accessToken: generateAccessToken(user),
       refreshToken: generateRefreshToken(user) // Tạo refresh token mới

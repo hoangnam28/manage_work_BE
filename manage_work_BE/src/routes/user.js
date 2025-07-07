@@ -94,9 +94,27 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
       return res.status(400).json({ message: 'Thiếu thông tin bắt buộc' });
     }
 
-    // Validate role
+    // Validate role (multi-role: array or comma string)
     const validRoles = ['admin', 'editor', 'viewer', 'imp', 'bo'];
-    if (!validRoles.includes(role)) {
+    let roleStr = '';
+    if (Array.isArray(role)) {
+      // FE gửi lên là mảng
+      for (const r of role) {
+        if (!validRoles.includes(r)) {
+          return res.status(400).json({ message: 'Role không hợp lệ' });
+        }
+      }
+      roleStr = role.join(',');
+    } else if (typeof role === 'string') {
+      // FE gửi lên là chuỗi (1 hoặc nhiều role, phân cách dấu phẩy)
+      const rolesArr = role.split(',').map(r => r.trim()).filter(Boolean);
+      for (const r of rolesArr) {
+        if (!validRoles.includes(r)) {
+          return res.status(400).json({ message: 'Role không hợp lệ' });
+        }
+      }
+      roleStr = rolesArr.join(',');
+    } else {
       return res.status(400).json({ message: 'Role không hợp lệ' });
     }
 
@@ -132,7 +150,7 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
         company_id: company_id.trim(),
         password_hash: password_hash.trim(),
         department: department ? department.trim() : null,
-        role: role
+        role: roleStr
       },
       { autoCommit: true }
     );
@@ -144,7 +162,7 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
         username: username.trim(),
         company_id: company_id.trim(),
         department: department,
-        role: role
+        role: roleStr
       }
     });
   } catch (error) {
@@ -180,10 +198,26 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
       return res.status(404).json({ message: 'Không tìm thấy người dùng' });
     }
 
-    // Validate role if provided
+    // Validate role if provided (multi-role)
+    let roleStr = undefined;
     if (role) {
       const validRoles = ['admin', 'editor', 'viewer', 'imp', 'bo'];
-      if (!validRoles.includes(role)) {
+      if (Array.isArray(role)) {
+        for (const r of role) {
+          if (!validRoles.includes(r)) {
+            return res.status(400).json({ message: 'Role không hợp lệ' });
+          }
+        }
+        roleStr = role.join(',');
+      } else if (typeof role === 'string') {
+        const rolesArr = role.split(',').map(r => r.trim()).filter(Boolean);
+        for (const r of rolesArr) {
+          if (!validRoles.includes(r)) {
+            return res.status(400).json({ message: 'Role không hợp lệ' });
+          }
+        }
+        roleStr = rolesArr.join(',');
+      } else {
         return res.status(400).json({ message: 'Role không hợp lệ' });
       }
     }
@@ -214,9 +248,9 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
       bindParams.password_hash = password_hash;
     }
 
-    if (role && role !== userExists.rows[0].ROLE) {
+    if (roleStr !== undefined && roleStr !== userExists.rows[0].ROLE) {
       updateFields.push('ROLE = :role');
-      bindParams.role = role;
+      bindParams.role = roleStr;
     }
 
     if (updateFields.length === 0) {
@@ -299,4 +333,62 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
     }
   }
 });
+
+// Đăng nhập
+router.post('/login', async (req, res) => {
+  const { company_id, password } = req.body;
+  let connection;
+
+  try {
+    connection = await database.getConnection();
+    const userCheck = await connection.execute(
+      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED, ROLE, EMAIL
+       FROM users 
+       WHERE TRIM(COMPANY_ID) = :company_id AND IS_DELETED = 0`,
+      { company_id }
+    );
+    const user = userCheck.rows[0];
+    if (!user) {
+      return res.status(401).json({ message: 'ID công ty hoặc mật khẩu không đúng' });
+    }
+    if (password !== user.PASSWORD_HASH) {
+      return res.status(401).json({ message: 'ID công ty hoặc mật khẩu không đúng' });
+    }
+
+    // Tạo token
+    const userPayload = {
+      userId: user.USER_ID,
+      username: user.USERNAME,
+      company_id: user.COMPANY_ID.trim(),
+      role: user.ROLE,
+      email: user.EMAIL
+    };
+
+    const token = jwt.sign(userPayload, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    res.json({
+      message: 'Đăng nhập thành công',
+      data: {
+        token: token,
+        user_id: user.USER_ID,
+        username: user.USERNAME,
+        company_id: user.COMPANY_ID,
+        role: user.ROLE,
+        email: user.EMAIL
+      }
+    });
+  } catch (error) {
+    console.error('Error logging in:', error);
+    res.status(500).json({ message: 'Lỗi server', error: error.message });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
 module.exports = router;
