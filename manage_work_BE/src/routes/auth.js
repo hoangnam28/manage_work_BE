@@ -14,7 +14,7 @@ router.post('/login', async (req, res) => {
     connection = await database.getConnection();
     
     const userCheck = await connection.execute(
-      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED, ROLE
+      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED, ROLE, DECODE(ROLE, 'imp', 1, 'bo', 1, 0) AS HAS_SPECIAL_ROLE
        FROM users 
        WHERE COMPANY_ID = :company_id`,
       { company_id },

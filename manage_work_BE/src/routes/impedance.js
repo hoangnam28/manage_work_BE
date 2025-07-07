@@ -33,7 +33,8 @@ const checkEditPermission = async (req, res, next) => {
   let connection;
   try {
     connection = await database.getConnection();
-    if (req.user.company_id !== '001507' && req.user.company_id !== '021253' && req.user.company_id !== '000001' && req.user.company_id !== '030783' && req.user.company_id !== '008048') {
+    // Kiểm tra role 'imp' cho phép xem/sửa Impedance
+    if (req.user.role !== 'imp') {
       return res.status(403).json({ message: 'Bạn không có quyền thực hiện thao tác này' });
     }
     next();

@@ -4,10 +4,44 @@ const database = require('../config/database');
 const database2 = require('../config/database_2');
 const oracledb = require('oracledb');
 const { sendMail } = require('../helper/sendMail');
+const jwt = require('jsonwebtoken');
 
 oracledb.fetchAsBuffer = [oracledb.BLOB];
 oracledb.autoCommit = true;
 
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ message: 'Không tìm thấy token' });
+  }
+
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ message: 'Token không hợp lệ' });
+    }
+    req.user = user;
+    next();
+  });
+};
+
+const checkBoPermission = async (req, res, next) => {
+  try {
+    // Kiểm tra role 'bo' cho phép xem/sửa DecideBoard
+    if (req.user.role !== 'bo') {
+      return res.status(403).json({ message: 'Bạn không có quyền thực hiện thao tác này' });
+    }
+    next();
+  } catch (error) {
+    console.error('Error checking bo permission:', error);
+    res.status(500).json({ message: 'Lỗi server' });
+  }
+};
+
+// Áp dụng middleware cho tất cả các routes
+router.use(authenticateToken);
+router.use(checkBoPermission);
 
 router.get('/customers', async (req, res) => {
   let connection;

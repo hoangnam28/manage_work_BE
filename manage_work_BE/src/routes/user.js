@@ -95,7 +95,7 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
     }
 
     // Validate role
-    const validRoles = ['admin', 'editor', 'viewer'];
+    const validRoles = ['admin', 'editor', 'viewer', 'imp', 'bo'];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ message: 'Role không hợp lệ' });
     }
@@ -182,7 +182,7 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
 
     // Validate role if provided
     if (role) {
-      const validRoles = ['admin', 'editor', 'viewer'];
+      const validRoles = ['admin', 'editor', 'viewer', 'imp', 'bo'];
       if (!validRoles.includes(role)) {
         return res.status(400).json({ message: 'Role không hợp lệ' });
       }
