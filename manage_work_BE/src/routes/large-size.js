@@ -127,11 +127,22 @@ router.post('/create', async (req, res) => {
     } = req.body;
 
     if (!customer_part_number || !type_board) {
-      return res.status(400).json({ error: 'customer_part_number và type_board là bắt buộc' });
+      return res.status(400).json({ error: 'customer_part_number và type_board là bắt buộc', message: 'Vui lòng nhập đầy đủ mã sản phẩm và loại bo.' });
     }
 
+    // Thêm dòng này để lấy connection
     connection = await database.getConnection();
-    
+
+    // Kiểm tra trùng mã hàng (customer_code) chưa bị xóa mềm
+    const checkExist = await connection.execute(
+      `SELECT COUNT(1) as CNT FROM large_size WHERE customer_code = :code AND is_deleted = 0`,
+      { code: customer_part_number },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    if (checkExist.rows[0] && checkExist.rows[0].CNT > 0) {
+      return res.status(400).json({ error: 'Mã sản phẩm đã tồn tại, không được tạo trùng.', message: 'Mã sản phẩm đã tồn tại, không được tạo trùng.' });
+    }
+
     // Truy vấn email của user từ database
     let creatorEmail = null;
     if (req.user && req.user.userId) {
@@ -141,7 +152,6 @@ router.post('/create', async (req, res) => {
           { userId: req.user.userId },
           { outFormat: oracledb.OUT_FORMAT_OBJECT }
         );
-        
         if (userResult.rows.length > 0) {
           creatorEmail = userResult.rows[0].EMAIL;
         }
@@ -149,9 +159,8 @@ router.post('/create', async (req, res) => {
         console.error('Error fetching user email:', userError);
       }
     }
-    
-    console.log('creatorEmail:', creatorEmail);
 
+    console.log('creatorEmail:', creatorEmail);
 
     const idResult = await connection.execute(`SELECT large_size_seq.NEXTVAL as ID FROM DUAL`);
     const nextId = idResult.rows[0][0];
@@ -230,14 +239,18 @@ router.post('/create', async (req, res) => {
       recipients.push(creatorEmail);
     }
     recipients = [...new Set(recipients)];
-    
+
     console.log('Final recipients:', recipients);
     sendMail(subject, html, recipients).catch(console.error);
 
-    res.status(201).json({ success: true, id: nextId });
+    res.status(201).json({ success: true, id: nextId, message: 'Tạo mới thành công!' });
   } catch (err) {
     console.error('Error in POST /create:', err);
-    res.status(500).json({ error: err.message });
+    // Ưu tiên trả về message rõ ràng nếu có
+    if (err && err.message) {
+      return res.status(500).json({ error: err.message, message: err.message });
+    }
+    res.status(500).json({ error: 'Lỗi server', message: 'Lỗi server' });
   } finally {
     if (connection) await connection.close();
   }
@@ -259,21 +272,30 @@ router.put('/update/:id', async (req, res) => {
     } = req.body;
 
     connection = await database.getConnection();
-    
+
+    // Không cho phép sửa mã sản phẩm
+    if (typeof customer_code !== 'undefined') {
+      return res.status(400).json({ error: 'Không được phép sửa mã sản phẩm' });
+    }
+
+    // Lấy thông tin cũ để so sánh
+    const oldResult = await connection.execute(
+      `SELECT customer_code, type_board, size_normal, rate_normal, size_big, rate_big, note FROM large_size WHERE id = :id`,
+      { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const oldRow = oldResult.rows[0] || {};
+
     // Xây dựng câu lệnh update động
     const fields = [];
     const binds = { id };
     if (typeof confirm_by !== 'undefined') {
       fields.push('confirm_by = :confirm_by');
       binds.confirm_by = confirm_by;
-
-      if (typeof request !== 'undefined') {
-        fields.push('request = :request');
-        binds.request = request;
-      } else {
-        fields.push('request = :request');
-        binds.request = 'TRUE';
-      }
+    }
+    if (typeof request !== 'undefined') {
+      fields.push('request = :request');
+      binds.request = request;
     }
     if (typeof type_board !== 'undefined') {
       fields.push('type_board = :type_board');
@@ -299,124 +321,266 @@ router.put('/update/:id', async (req, res) => {
       fields.push('note = :note');
       binds.note = note;
     }
-    if (typeof customer_code !== 'undefined') {
-      fields.push('customer_code = :customer_code');
-      binds.customer_code = customer_code;
-    }
-    
+
     if (fields.length === 0) {
       return res.status(400).json({ error: 'Không có trường nào để cập nhật' });
     }
-    
-    const sql = `UPDATE large_size SET ${fields.join(', ')} WHERE id = :id`;
-    await connection.execute(sql, binds, { autoCommit: true });
 
-    // Nếu xác nhận (có confirm_by), gửi mail báo đã xác nhận
-    if (typeof confirm_by !== 'undefined') {
-      // Lấy lại thông tin mã hàng để gửi mail đầy đủ
-      const result = await connection.execute(
-        `SELECT customer_code, type_board, size_normal, rate_normal, size_big, rate_big, note, request, created_by_email FROM large_size WHERE id = :id`,
+    // Kiểm tra các trường quan trọng có thay đổi không (KHÔNG tính request)
+    const importantFields = [
+      { key: 'type_board', old: oldRow.TYPE_BOARD, new: type_board },
+      { key: 'size_normal', old: oldRow.SIZE_NORMAL, new: size_normal },
+      { key: 'size_big', old: oldRow.SIZE_BIG, new: size_big },
+      { key: 'rate_normal', old: oldRow.RATE_NORMAL, new: rate_normal },
+      { key: 'rate_big', old: oldRow.RATE_BIG, new: rate_big }
+    ];
+    const hasImportantChange = importantFields.some(f => typeof f.new !== 'undefined' && String(f.old || '').trim() !== String(f.new || '').trim());
+
+    // Lấy giá trị request cũ để kiểm tra thay đổi riêng
+    let oldRequest = null;
+    if (typeof request !== 'undefined') {
+      const oldReqResult = await connection.execute(
+        `SELECT request FROM large_size WHERE id = :id`,
         { id },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
-      const row = result.rows[0] || {};
-      
-      // Nếu không có created_by_email trong database, thử tìm bằng cách khác
-      let creatorEmail = row.CREATED_BY_EMAIL;
-      if (!creatorEmail) {
-        console.log('No created_by_email found in large_size table, using fallback mapping');
-        // Fallback mapping nếu cần
-        const emailMap = {
-          'Nguyễn Hoàng Nam': 'nam.nguyenhoang@meiko-elec.com',
-          'Nguyễn Kiều Trang': 'trang.nguyenkieu@meiko-elec.com',
-          'Vũ Tiến Thành': 'thanh.vutien@meiko-elec.com',
-          'Nguyễn Thị Thúy': 'thuy.nguyen2@meiko-elec.com'
-        };
-        // Có thể cần thêm logic để tìm username của người tạo
-        creatorEmail = null; // Tạm thời để null nếu không tìm được
-      }
-      
-      console.log('Creator email for notification:', creatorEmail);
-      
-      const feUrl = `http://192.84.105.173:4000/decide-board/${id}`;
-      const isUseLarge = (row.REQUEST || request) === 'TRUE';
-      const subject = `Đã xác nhận yêu cầu sử dụng bo to của mã hàng: ${row.CUSTOMER_CODE || customer_code || ''}`;
+      oldRequest = oldReqResult.rows[0] ? oldReqResult.rows[0].REQUEST : null;
+    }
+
+    // Nếu có cập nhật trường quan trọng và không phải là xác nhận, reset confirm_by
+    if (hasImportantChange && typeof confirm_by === 'undefined') {
+      fields.push('confirm_by = :reset_confirm_by');
+      binds.reset_confirm_by = '';
+    }
+
+    const sql = `UPDATE large_size SET ${fields.join(', ')} WHERE id = :id`;
+    await connection.execute(sql, binds, { autoCommit: true });
+
+    // Lấy thông tin mã hàng sau khi update
+    const result = await connection.execute(
+      `SELECT customer_code, type_board, size_normal, rate_normal, size_big, rate_big, note, request, created_by_email FROM large_size WHERE id = :id`,
+      { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    const row = result.rows[0] || {};
+
+    let creatorEmail = row.CREATED_BY_EMAIL;
+    if (!creatorEmail) {
+      creatorEmail = null;
+    }
+
+    const feUrl = `http://192.84.105.173:4000/decide-board/${id}`;
+    const isUseLarge = (row.REQUEST || request) === 'TRUE';
+
+    // Xử lý gửi mail dựa trên trường hợp
+    if (typeof confirm_by !== 'undefined' && confirm_by !== '') {
+      // Trường hợp xác nhận
+      const subject = `Đã xác nhận yêu cầu sử dụng bo to của mã hàng: ${row.CUSTOMER_CODE || ''}`;
       const html = `
-    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
-    <tr>
-      <th align="left">Mã sản phẩm</th>
-      <td>${row.CUSTOMER_CODE || customer_code || ''}</td>
-    </tr>
-    <tr>
-      <th align="left">Loại bo</th>
-      <td>${row.TYPE_BOARD || type_board || ''}</td>
-    </tr>
-    <tr>
-      <th align="left">Kích thước Tối ưu</th>
-      <td>${row.SIZE_NORMAL || size_normal || ''}</td>
-    </tr>
-    <tr>
-      <th align="left">Tỷ lệ % (Bo thường)</th>
-      <td>${row.RATE_NORMAL || rate_normal || ''}</td>
-    </tr>
-    <tr>
-      <th align="left">Kích thước bo to</th>
-      <td>${row.SIZE_BIG || size_big || ''}</td>
-    </tr>
-    <tr>
-      <th align="left">Tỷ lệ % (Bo to)</th>
-      <td>${row.RATE_BIG || rate_big || ''}</td>
-    </tr>
-    <tr>
-      <th align="left">Người xác nhận</th>
-      <td>${confirm_by}</td>
-    </tr>
-    <tr>
-      <th align="left">Xác nhận ngày</th>
-      <td>${new Date().toLocaleString()}</td>
-    </tr>
-    <tr>
-      <th align="left">Yêu cầu sử dụng bo to</th>
-      <td>${isUseLarge ? 'Có' : 'Không'}</td>
-    </tr>
-    <tr>
-      <th align="left">Ghi chú</th>
-      <td>${row.NOTE || note || ''}</td>
-    </tr>  
-    </table>
-    <br>
-    <a href="${feUrl}">Link Xem chi tiết mã hàng đã xác nhận</a>
-    <br>
-    <br>
-    <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
-    <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
-`;
-      
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+          <tr>
+            <th align="left">Mã sản phẩm</th>
+            <td>${row.CUSTOMER_CODE || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Loại bo</th>
+            <td>${row.TYPE_BOARD || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Kích thước Tối ưu</th>
+            <td>${row.SIZE_NORMAL || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Tỷ lệ % (Bo thường)</th>
+            <td>${row.RATE_NORMAL || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Kích thước bo to</th>
+            <td>${row.SIZE_BIG || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Tỷ lệ % (Bo to)</th>
+            <td>${row.RATE_BIG || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Người xác nhận</th>
+            <td>${confirm_by}</td>
+          </tr>
+          <tr>
+            <th align="left">Xác nhận ngày</th>
+            <td>${new Date().toLocaleString()}</td>
+          </tr>
+          <tr>
+            <th align="left">Yêu cầu sử dụng bo to</th>
+            <td>${isUseLarge ? 'Có' : 'Không'}</td>
+          </tr>
+          <tr>
+            <th align="left">Ghi chú</th>
+            <td>${row.NOTE || ''}</td>
+          </tr>  
+        </table>
+        <br>
+        <a href="${feUrl}">Link Xem chi tiết mã hàng đã xác nhận</a>
+        <br>
+        <br>
+        <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
+        <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
+      `;
+
       let recipients = [];
-      
+
       if (!isUseLarge) {
         // Nếu xác nhận 'Không': gửi cho người tạo và toàn bộ mail của bên PC
-        console.log('Confirmation: NO - Sending to creator + PC team');
         recipients = [...pcEmails];
         if (creatorEmail && !recipients.includes(creatorEmail)) {
           recipients.push(creatorEmail);
         }
       } else {
         // Nếu xác nhận 'Có': gửi cho tất cả các bên (người tạo, PC, CI, TK)
-        console.log('Confirmation: YES - Sending to all teams (creator + PC + CI + TK)');
-        recipients = [...pcEmails, ...ciEmails, ...tkEmails];
+        recipients = [...pcEmails, ...ciEmails, ...tkEmails]; 
         if (creatorEmail && !recipients.includes(creatorEmail)) {
           recipients.push(creatorEmail);
         }
       }
-      
-      // Loại bỏ trùng lặp
+
+      recipients = [...new Set(recipients)];
+      sendMail(subject, html, recipients).catch(console.error);
+
+    } else if (hasImportantChange) {
+      // Trường hợp cập nhật thông tin quan trọng - gửi mail yêu cầu xác nhận lại
+      const subject = `Yêu cầu xác nhận lại thông tin mã hàng: ${row.CUSTOMER_CODE || ''}`;
+      const html = `
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+          <tr>
+            <th align="left">Mã sản phẩm</th>
+            <td>${row.CUSTOMER_CODE || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Loại bo</th>
+            <td>${row.TYPE_BOARD || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Kích thước Tối ưu</th>
+            <td>${row.SIZE_NORMAL || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Tỷ lệ % (Bo thường)</th>
+            <td>${row.RATE_NORMAL || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Kích thước bo to</th>
+            <td>${row.SIZE_BIG || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Tỷ lệ % (Bo to)</th>
+            <td>${row.RATE_BIG || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Yêu cầu sử dụng bo to</th>
+            <td>${isUseLarge ? 'Có' : 'Không'}</td>
+          </tr>
+          <tr>
+            <th align="left">Ghi chú</th>
+            <td>${row.NOTE || ''}</td>
+          </tr>
+          <tr>
+            <th align="left" colspan="2" style="color:#d48806;">Thông tin đã được cập nhật - Yêu cầu xác nhận lại!</th>
+          </tr>
+        </table>
+        <br>
+        <a href="${feUrl}">Link Xem chi tiết mã hàng cần xác nhận lại</a>
+        <br>
+        <br>
+        <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
+        <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
+      `;
+
+      // Gửi cho PC và người tạo (giống như khi tạo mới)
+      let recipients = [...pcEmails];
+      if (creatorEmail && !recipients.includes(creatorEmail)) {
+        recipients.push(creatorEmail);
+      }
       recipients = [...new Set(recipients)];
       
-      console.log('Final recipients list:', recipients);
-      console.log('Recipients count:', recipients.length);
-      
-      // Gửi mail
+      console.log('Sending reconfirmation email to:', recipients);
+      sendMail(subject, html, recipients).catch(console.error);
+    }
+
+    // Gửi mail khi thay đổi trường request (Có <-> Không), giữ nguyên trạng thái và người xác nhận
+    if (
+      typeof request !== 'undefined' &&
+      oldRequest !== null &&
+      oldRequest !== '' &&
+      String(oldRequest).toUpperCase() !== String(request).toUpperCase()
+    ) {
+      let userName = req.user && req.user.username ? req.user.username : '';
+      if (userName) {
+        await connection.execute(
+          `UPDATE large_size SET confirm_by = :userName WHERE id = :id`,
+          { userName, id },
+          { autoCommit: true }
+        );
+      }
+      const subject = `PC đã sửa xác nhận Yêu cầu sử dụng bo to của mã hàng: ${row.CUSTOMER_CODE || ''}`;
+      const html = `
+        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+          <tr>
+            <th align="left">Mã sản phẩm</th>
+            <td>${row.CUSTOMER_CODE || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Loại bo</th>
+            <td>${row.TYPE_BOARD || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Kích thước Tối ưu</th>
+            <td>${row.SIZE_NORMAL || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Tỷ lệ % (Bo thường)</th>
+            <td>${row.RATE_NORMAL || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Kích thước bo to</th>
+            <td>${row.SIZE_BIG || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Tỷ lệ % (Bo to)</th>
+            <td>${row.RATE_BIG || ''}</td>
+          </tr>
+          <tr>
+            <th align="left">Yêu cầu sử dụng bo to (MỚI)</th>
+            <td>${String(request).toUpperCase() === 'TRUE' ? 'Có' : 'Không'}</td>
+          </tr>
+          <tr>
+            <th align="left">Yêu cầu sử dụng bo to (CŨ)</th>
+            <td>${String(oldRequest).toUpperCase() === 'TRUE' ? 'Có' : 'Không'}</td>
+          </tr>
+          <tr>
+            <th align="left">Người xác nhận hiện tại</th>
+            <td>${userName}</td>
+          </tr>
+          <tr>
+            <th align="left">Ghi chú</th>
+            <td>${row.NOTE || ''}</td>
+          </tr>
+          <tr>
+            <th align="left" colspan="2" style="color:#d48806;">PC đã sửa xác nhận Yêu cầu sử dụng bo to!</th>
+          </tr>
+        </table>
+        <br>
+        <a href="${feUrl}">Link Xem chi tiết mã hàng</a>
+        <br>
+        <br>
+        <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
+        <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
+      `;
+      // Gửi cho tất cả các bên (người tạo, PC, CI, TK)
+      let recipients = [...pcEmails, ...ciEmails, ...tkEmails];
+      if (creatorEmail && !recipients.includes(creatorEmail)) {
+        recipients.push(creatorEmail);
+      }
+      recipients = [...new Set(recipients)];
       sendMail(subject, html, recipients).catch(console.error);
     }
 
