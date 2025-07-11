@@ -98,7 +98,7 @@ router.get('/list', async (req, res) => {
   try {
     connection = await database.getConnection();
     const result = await connection.execute(
-      `SELECT id, customer_code, type_board, size_normal, rate_normal, size_big, rate_big, request, confirm_by, note FROM large_size WHERE is_deleted = 0`,
+      `SELECT id, customer_code, type_board, size_normal, rate_normal, size_big, rate_big, request, confirm_by, note, is_deleted FROM large_size`,
       [],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -184,8 +184,43 @@ router.post('/create', async (req, res) => {
         note,
         created_by_email: creatorEmail
       },
-      { autoCommit: true }
+      { autoCommit: false }
     );
+
+    // Lưu lịch sử tạo mới
+    const historyIdResult = await connection.execute(`SELECT large_size_history_seq.NEXTVAL as ID FROM DUAL`);
+    const historyId = historyIdResult.rows[0][0];
+
+    await connection.execute(
+      `INSERT INTO large_size_history (
+        history_id, id, type_board, size_normal, rate_normal, size_big, rate_big, 
+        request, confirm_by, note, customer_code, is_deleted, created_by_email, 
+        action_by_email, action_at, action_type
+      ) VALUES (
+        :history_id, :id, :type_board, :size_normal, :rate_normal, :size_big, :rate_big,
+        :request, :confirm_by, :note, :customer_code, :is_deleted, :created_by_email,
+        :action_by_email, CURRENT_TIMESTAMP, 'CREATE'
+      )`,
+      {
+        history_id: historyId,
+        id: nextId,
+        type_board: type_board || '',
+        size_normal: size_normal || '',
+        rate_normal: rate_normal || '',
+        size_big: size_big || '',
+        rate_big: rate_big || '',
+        request: request || '',
+        confirm_by: confirm_by || '',
+        note: note || '',
+        customer_code: customer_part_number,
+        is_deleted: 0,
+        created_by_email: creatorEmail,
+        action_by_email: creatorEmail
+      },
+      { autoCommit: false }
+    );
+
+    await connection.commit();
 
     // Gửi mail thông báo yêu cầu xác nhận
     const feUrl = `http://192.84.105.173:4000/decide-board/${nextId}`;
@@ -280,7 +315,7 @@ router.put('/update/:id', async (req, res) => {
 
     // Lấy thông tin cũ để so sánh
     const oldResult = await connection.execute(
-      `SELECT customer_code, type_board, size_normal, rate_normal, size_big, rate_big, note FROM large_size WHERE id = :id`,
+      `SELECT customer_code, type_board, size_normal, rate_normal, size_big, rate_big, note, request, confirm_by FROM large_size WHERE id = :id`,
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -326,6 +361,56 @@ router.put('/update/:id', async (req, res) => {
       return res.status(400).json({ error: 'Không có trường nào để cập nhật' });
     }
 
+    // Lấy email của user hiện tại
+    let actionByEmail = null;
+    if (req.user && req.user.userId) {
+      try {
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          actionByEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (userError) {
+        console.error('Error fetching user email:', userError);
+      }
+    }
+
+    // Lưu lịch sử trước khi update
+    const historyIdResult = await connection.execute(`SELECT large_size_history_seq.NEXTVAL as ID FROM DUAL`);
+    const historyId = historyIdResult.rows[0][0];
+
+    await connection.execute(
+      `INSERT INTO large_size_history (
+        history_id, id, type_board, size_normal, rate_normal, size_big, rate_big, 
+        request, confirm_by, note, customer_code, is_deleted, created_by_email, 
+        action_by_email, action_at, action_type
+      ) VALUES (
+        :history_id, :id, :type_board, :size_normal, :rate_normal, :size_big, :rate_big,
+        :request, :confirm_by, :note, :customer_code, :is_deleted, :created_by_email,
+        :action_by_email, CURRENT_TIMESTAMP, 'UPDATE'
+      )`,
+      {
+        history_id: historyId,
+        id: id,
+        type_board: oldRow.TYPE_BOARD || '',
+        size_normal: oldRow.SIZE_NORMAL || '',
+        rate_normal: oldRow.RATE_NORMAL || '',
+        size_big: oldRow.SIZE_BIG || '',
+        rate_big: oldRow.RATE_BIG || '',
+        request: oldRow.REQUEST || '',
+        confirm_by: oldRow.CONFIRM_BY || '',
+        note: oldRow.NOTE || '',
+        customer_code: oldRow.CUSTOMER_CODE || '',
+        is_deleted: 0,
+        created_by_email: oldRow.CREATED_BY_EMAIL || '',
+        action_by_email: actionByEmail
+      },
+      { autoCommit: false }
+    );
+
     // Kiểm tra các trường quan trọng có thay đổi không (KHÔNG tính request)
     const importantFields = [
       { key: 'type_board', old: oldRow.TYPE_BOARD, new: type_board },
@@ -354,7 +439,9 @@ router.put('/update/:id', async (req, res) => {
     }
 
     const sql = `UPDATE large_size SET ${fields.join(', ')} WHERE id = :id`;
-    await connection.execute(sql, binds, { autoCommit: true });
+    await connection.execute(sql, binds, { autoCommit: false });
+
+    await connection.commit();
 
     // Lấy thông tin mã hàng sau khi update
     const result = await connection.execute(
@@ -604,11 +691,78 @@ router.delete('/delete/:id', async (req, res) => {
     }
     id = Number(id);
     connection = await database.getConnection();
+    
+    // Lấy thông tin bản ghi trước khi xóa
+    const oldResult = await connection.execute(
+      `SELECT * FROM large_size WHERE id = :id`,
+      { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    
+    if (oldResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
+    }
+    
+    const oldRow = oldResult.rows[0];
+    
+    // Lấy email của user hiện tại
+    let actionByEmail = null;
+    if (req.user && req.user.userId) {
+      try {
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          actionByEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (userError) {
+        console.error('Error fetching user email:', userError);
+      }
+    }
+    
+    // Lưu lịch sử trước khi xóa
+    const historyIdResult = await connection.execute(`SELECT large_size_history_seq.NEXTVAL as ID FROM DUAL`);
+    const historyId = historyIdResult.rows[0][0];
+
+    await connection.execute(
+      `INSERT INTO large_size_history (
+        history_id, id, type_board, size_normal, rate_normal, size_big, rate_big, 
+        request, confirm_by, note, customer_code, is_deleted, created_by_email, 
+        action_by_email, action_at, action_type
+      ) VALUES (
+        :history_id, :id, :type_board, :size_normal, :rate_normal, :size_big, :rate_big,
+        :request, :confirm_by, :note, :customer_code, :is_deleted, :created_by_email,
+        :action_by_email, CURRENT_TIMESTAMP, 'DELETE'
+      )`,
+      {
+        history_id: historyId,
+        id: id,
+        type_board: oldRow.TYPE_BOARD || '',
+        size_normal: oldRow.SIZE_NORMAL || '',
+        rate_normal: oldRow.RATE_NORMAL || '',
+        size_big: oldRow.SIZE_BIG || '',
+        rate_big: oldRow.RATE_BIG || '',
+        request: oldRow.REQUEST || '',
+        confirm_by: oldRow.CONFIRM_BY || '',
+        note: oldRow.NOTE || '',
+        customer_code: oldRow.CUSTOMER_CODE || '',
+        is_deleted: 1,
+        created_by_email: oldRow.CREATED_BY_EMAIL || '',
+        action_by_email: actionByEmail
+      },
+      { autoCommit: false }
+    );
+    
     const result = await connection.execute(
       `UPDATE large_size SET is_deleted = 1 WHERE id = :id`,
       { id },
-      { autoCommit: true }
+      { autoCommit: false }
     );
+    
+    await connection.commit();
+    
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
@@ -618,6 +772,128 @@ router.delete('/delete/:id', async (req, res) => {
     });
   } catch (err) {
     console.error('Error deleting material core:', err);
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Error during rollback:', rollbackError);
+      }
+    }
+    res.status(500).json({
+      message: 'Lỗi server',
+      error: err.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+// API khôi phục bản ghi đã xóa
+router.put('/restore/:id', async (req, res) => {
+  let { id } = req.params;
+  let connection;
+  try {
+    if (!id || isNaN(Number(id))) {
+      return res.status(400).json({
+        message: 'ID không hợp lệ'
+      });
+    }
+    id = Number(id);
+    connection = await database.getConnection();
+    
+    // Lấy thông tin bản ghi trước khi khôi phục
+    const oldResult = await connection.execute(
+      `SELECT * FROM large_size WHERE id = :id`,
+      { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    
+    if (oldResult.rows.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
+    }
+    
+    const oldRow = oldResult.rows[0];
+    
+    // Lấy email của user hiện tại
+    let actionByEmail = null;
+    if (req.user && req.user.userId) {
+      try {
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          actionByEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (userError) {
+        console.error('Error fetching user email:', userError);
+      }
+    }
+    
+    // Lưu lịch sử trước khi khôi phục
+    const historyIdResult = await connection.execute(`SELECT large_size_history_seq.NEXTVAL as ID FROM DUAL`);
+    const historyId = historyIdResult.rows[0][0];
+
+    await connection.execute(
+      `INSERT INTO large_size_history (
+        history_id, id, type_board, size_normal, rate_normal, size_big, rate_big, 
+        request, confirm_by, note, customer_code, is_deleted, created_by_email, 
+        action_by_email, action_at, action_type
+      ) VALUES (
+        :history_id, :id, :type_board, :size_normal, :rate_normal, :size_big, :rate_big,
+        :request, :confirm_by, :note, :customer_code, :is_deleted, :created_by_email,
+        :action_by_email, CURRENT_TIMESTAMP, 'RESTORE'
+      )`,
+      {
+        history_id: historyId,
+        id: id,
+        type_board: oldRow.TYPE_BOARD || '',
+        size_normal: oldRow.SIZE_NORMAL || '',
+        rate_normal: oldRow.RATE_NORMAL || '',
+        size_big: oldRow.SIZE_BIG || '',
+        rate_big: oldRow.RATE_BIG || '',
+        request: oldRow.REQUEST || '',
+        confirm_by: oldRow.CONFIRM_BY || '',
+        note: oldRow.NOTE || '',
+        customer_code: oldRow.CUSTOMER_CODE || '',
+        is_deleted: 0,
+        created_by_email: oldRow.CREATED_BY_EMAIL || '',
+        action_by_email: actionByEmail
+      },
+      { autoCommit: false }
+    );
+    
+    const result = await connection.execute(
+      `UPDATE large_size SET is_deleted = 0 WHERE id = :id`,
+      { id },
+      { autoCommit: false }
+    );
+    
+    await connection.commit();
+    
+    if (result.rowsAffected === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
+    }
+    res.json({
+      message: 'Khôi phục thành công',
+      id: id
+    });
+  } catch (err) {
+    console.error('Error restoring record:', err);
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Error during rollback:', rollbackError);
+      }
+    }
     res.status(500).json({
       message: 'Lỗi server',
       error: err.message
@@ -639,7 +915,7 @@ router.get('/detail/:id', async (req, res) => {
     const { id } = req.params;
     connection = await database.getConnection();
     const result = await connection.execute(
-      `SELECT * FROM large_size WHERE id = :id AND is_deleted = 0`,
+      `SELECT * FROM large_size WHERE id = :id`,
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -648,6 +924,47 @@ router.get('/detail/:id', async (req, res) => {
     }
     res.json(result.rows[0]);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+// API lấy lịch sử chỉnh sửa của một mã hàng
+router.get('/history/:id', async (req, res) => {
+  let connection;
+  try {
+    const { id } = req.params;
+    connection = await database.getConnection();
+    
+    const result = await connection.execute(
+      `SELECT 
+        history_id,
+        id,
+        type_board,
+        size_normal,
+        rate_normal,
+        size_big,
+        rate_big,
+        request,
+        confirm_by,
+        note,
+        customer_code,
+        is_deleted,
+        created_by_email,
+        action_by_email,
+        TO_CHAR(action_at, 'DD/MM/YYYY HH24:MI:SS') as action_at,
+        action_type
+       FROM large_size_history 
+       WHERE id = :id 
+       ORDER BY action_at DESC`,
+      { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching history:', err);
     res.status(500).json({ error: err.message });
   } finally {
     if (connection) await connection.close();
