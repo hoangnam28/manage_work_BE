@@ -2,8 +2,10 @@ const express = require('express');
 const router = express.Router();
 const oracledb = require('oracledb');
 const database = require('../config/database');
-const jwt = require('jsonwebtoken');
 require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
 
 const { authenticateToken, checkEditPermission } = require('../middleware/auth');
 
@@ -460,5 +462,104 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
     }
   }
 });
+
+function numberToColumnName(num) {
+  let result = '';
+  while (num > 0) {
+    num--;
+    result = String.fromCharCode(65 + (num % 26)) + result;
+    num = Math.floor(num / 26);
+  }
+  return result;
+}
+
+function cloneFileSync(src, dest) {
+  fs.copyFileSync(src, dest);
+}
+
+router.post('/export-xlsm', async (req, res) => {
+  try {
+    const data = req.body.data;
+    if (!data || !Array.isArray(data)) {
+      return res.status(400).json({ message: 'Invalid data format' });
+    }
+
+    const templatePath = path.join(__dirname, '../public/template/TemplateMaterial.xlsm');
+    if (!fs.existsSync(templatePath)) {
+      return res.status(404).json({ message: 'Template file not found' });
+    }
+
+    const tempName = `MaterialPPExport_${Date.now()}.xlsm`;
+    const tempPath = path.join(__dirname, `../public/template/${tempName}`);
+    cloneFileSync(templatePath, tempPath);
+
+    const workbook = XLSX.readFile(tempPath, { type: 'binary', bookVBA: true });
+
+    const sheetName = workbook.SheetNames[7];
+    if (!sheetName) {
+      fs.unlinkSync(tempPath);
+      return res.status(500).json({ message: 'Sheet 7 not found in template' });
+    }
+
+    const ws = workbook.Sheets[sheetName];
+
+    const map = [
+      'VENDOR','FAMILY','PREPREG_COUNT','NOMINAL_THICKNESS','SPEC_THICKNESS',
+      'PREFERENCE_CLASS','USE_TYPE','RIGID','TOP_FOIL_CU_WEIGHT','BOT_FOIL_CU_WEIGHT',
+      'TG_MIN','TG_MAX','CENTER_GLASS',
+      null, null, null, null, null, 'DK_01G','DF_01G','DK_0_001GHZ','DF_0_001GHZ','DK_0_01GHZ','DF_0_01GHZ',
+      'DK_0_02GHZ','DF_0_02GHZ','DK_2GHZ','DF_2GHZ','DK_2_45GHZ','DF_2_45GHZ',
+      'DK_3GHZ','DF_3GHZ','DK_4GHZ', 'DF_4GHZ','DK_5GHZ','DF_5GHZ',
+      'DK_6GHZ', 'DF_6GHZ','DK_7GHZ', 'DF_7GHZ',
+      'DK_8GHZ','DF_8GHZ','DK_9GHZ', 'DF_9GHZ','DK_10GHZ','DF_10GHZ','DK_15GHZ','DF_15GHZ',
+      'DK_16GHZ','DF_16GHZ','DK_20GHZ','DF_20GHZ','DK_25GHZ','DF_25GHZ',
+      'DK_30GHZ','DF_30GHZ','DK_35GHZ__','DF_35GHZ__','DK_40GHZ','DF_40GHZ',
+      'DK_45GHZ','DF_45GHZ','DK_50GHZ','DF_50GHZ','DK_55GHZ','DF_55GHZ',
+      'IS_HF','DATA_SOURCE'
+    ];
+
+    data.forEach((row, idx) => {
+      const excelRow = idx + 3;
+      let colIndex = 6;
+
+      for (let i = 0; i < map.length; i++) {
+        if (!map[i]) {
+          colIndex++;
+          continue;
+        }
+        const col = numberToColumnName(colIndex);
+        const cell = `${col}${excelRow}`;
+        let value = row[map[i]] ?? row[map[i]?.toLowerCase()] ?? '';
+        ws[cell] = { t: 's', v: String(value) };
+        colIndex++;
+      }
+    });
+
+    XLSX.writeFile(workbook, tempPath, { bookType: 'xlsm', bookVBA: true });
+
+    res.setHeader('Content-Disposition', `attachment; filename=MaterialCoreExport.xlsm`);
+    res.setHeader('Content-Type', 'application/vnd.ms-excel.sheet.macroEnabled.12');
+
+    const fileBuffer = fs.readFileSync(tempPath);
+    res.end(fileBuffer);
+
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch (cleanupError) {
+        console.warn('Could not cleanup temp file:', cleanupError.message);
+      }
+    }, 10000);
+
+  } catch (err) {
+    console.error('Export-xlsm error:', err);
+    res.status(500).json({
+      message: 'Export-xlsm failed',
+      error: err.message,
+      suggestion: 'Kiểm tra template file và định dạng dữ liệu input'
+    });
+  }
+});
+
 
 module.exports = router;

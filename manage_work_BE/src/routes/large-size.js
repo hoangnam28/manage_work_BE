@@ -10,15 +10,49 @@ oracledb.fetchAsBuffer = [oracledb.BLOB];
 oracledb.autoCommit = true;
 
 const pcEmails = [
-  'trang.nguyenkieu@meiko-elec.com',
-  'thuy.nguyen2@meiko-elec.com'
+  'nam.khuatvan@meiko-elec.com',
+  'vinh.hoangxuan@meiko-elec.com',
+  'quyen.can@meiko-elec.com',
+  'thu.dinh@meiko-elec.com',
+  'loan.domai@meiko-elec.com',
+  'phuonganh.bui@meiko-elec.com'
 ];
 const ciEmails = [
-  'thanh.vutien@meiko-elec.com',
+  'hung.khuathuu@meiko-elec.com',
+  'quyen.tavan@meiko-elec.com',
+  'thuy.nguyen1@meiko-elec.com',
+  'thoi.nguyen@meiko-elec.com',
+  'khoi.lecong@meiko-elec.com',
+  'hung.nguyen@meiko-elec.com',
+  'phong.nguyentuan@meiko-elec.com',
+  'quang.nguyenvan3@meiko-elec.com',
+  'haianh.nguyen@meiko-elec.com',
+  'son.lebao@meiko-elec.com',
+  'loc.doan@meiko-elec.com',
+  'tuyetanh.tran@meiko-elec.com',
+  'anh.dohong@meiko-elec.com',
+  'ha.nguyenthe@meiko-elec.com',
+  'tu.kieuviet@meiko-elec.com',
+  'an.lexuan@meiko-elec.com',
+  'hung.nguyen@meiko-elec.com',
+  'trung.phamngoc@meiko-elec.com',
+  'tuan.phamminh@meiko-elec.com',
+  'thanh.vutien@meiko-elec.com'
 ];
 const tkEmails = [
-  'trang.nguyenkieu@meiko-elec.com',
-  'nam.nguyenhoang@meiko-elec.com'
+  'hang.ngo@meiko-elec.com',
+  'phu.mai@meiko-elec.com',
+  'van.nguyenthanh@meiko-elec.com',
+  'dung.dovan@meiko-elec.com',
+  'dao.ngominh@meiko-elec.com',
+  'huy.nguyendinh2@meiko-elec.com',
+  'viet.nguyenvuong@meiko-elec.com',
+  'cong.nguyenthanh@meiko-elec.com',
+  'duc.nguyentai@meiko-elec.com',
+  'tuan.luonganh@meiko-elec.com',
+  'nhung.lethihong@meiko-elec.com',
+  'tung.tranba@meiko-elec.com',
+  'chien.nguyenvan@meiko-elec.com'
 ];
 
 const authenticateToken = (req, res, next) => {
