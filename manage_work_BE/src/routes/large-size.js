@@ -628,12 +628,15 @@ router.put('/update/:id', async (req, res) => {
     }
 
     // Gửi mail khi thay đổi trường request (Có <-> Không), giữ nguyên trạng thái và người xác nhận
-    if (
-      typeof request !== 'undefined' &&
-      oldRequest !== null &&
-      oldRequest !== '' &&
-      String(oldRequest).toUpperCase() !== String(request).toUpperCase()
-    ) {
+if (
+  typeof request !== 'undefined' &&
+  oldRequest !== null &&
+  oldRequest !== '' &&
+  String(oldRequest).toUpperCase() !== String(request).toUpperCase() &&
+  oldRow.CONFIRM_BY && 
+  oldRow.CONFIRM_BY.trim() !== '' &&
+  !hasImportantChange // Thêm điều kiện này
+) {
       let userName = req.user && req.user.username ? req.user.username : '';
       if (userName) {
         await connection.execute(
