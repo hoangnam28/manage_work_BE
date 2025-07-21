@@ -26,13 +26,13 @@ router.get('/list', authenticateToken, async (req, res) => {
         material_type,
         erp,
         erp_vendor,
-        pp_type,
         is_caf,
         tg,
         bord_type,
         plastic,
         file_name,
         data,
+        is_deleted
        FROM material_new
        WHERE is_deleted = 0
        ORDER BY id DESC`,
@@ -86,7 +86,6 @@ router.post('/create', async (req, res) => {
       material_type: data.material_type,
       erp: data.erp,
       erp_vendor: data.erp_vendor,
-      pp_type: data.pp_type,
       is_caf: data.is_caf || 'FALSE',
       tg: data.tg,
       bord_type: data.bord_type,
@@ -171,7 +170,6 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       material_type: 'material_type',
       erp: 'erp',
       erp_vendor: 'erp_vendor',
-      pp_type: 'pp_type',
       is_caf: 'is_caf',
       tg: 'tg',
       bord_type: 'bord_type',

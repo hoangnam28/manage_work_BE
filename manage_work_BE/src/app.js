@@ -9,6 +9,7 @@ const impedanceRoutes = require('./routes/impedance');
 const userRoutes = require('./routes/user');
 const materialCoreRoutes = require('./routes/material-core');
 const materialPPRoutes = require('./routes/material-pp');
+const materialNewRoutes = require('./routes/material-new');
 const largeSize = require('./routes/large-size');
 const path = require('path');
 const fs = require('fs');
@@ -55,6 +56,8 @@ app.use('/api/material-core', materialCoreRoutes);
 app.use('/api/material-pp', materialPPRoutes);
 
 app.use('/api/large-size', largeSize);
+
+app.use('/api/material-new', materialNewRoutes);
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
