@@ -10,13 +10,14 @@ const fs = require('fs');
 const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
 
 const { authenticateToken, checkEditPermission } = require('../middleware/auth');
+const { addHistoryRecord } = require('./material-core-history');
 
 // Lấy danh sách material core
 router.get('/list', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
-      const result = await connection.execute(      `SELECT 
+    const result = await connection.execute(`SELECT 
         id,
         requester_name,
         request_date,
@@ -114,7 +115,7 @@ router.get('/list', authenticateToken, async (req, res) => {
 });
 
 // Thêm mới material core
-router.post('/create', async (req, res) => {
+router.post('/create', authenticateToken, async (req, res) => {
   let connection;
   try {
     const data = req.body;
@@ -278,6 +279,84 @@ router.post('/create', async (req, res) => {
         bindParams,
         { autoCommit: true }
       );
+      // Lưu lịch sử
+      try {
+        await addHistoryRecord(connection, {
+          materialCoreId: nextId,
+          actionType: 'CREATE',
+          createdBy: req.user.username,
+          data: {
+            vendor: data.vendor,
+            family: data.family,
+            prepreg_count: data.prepreg_count,
+            nominal_thickness: data.nominal_thickness,
+            spec_thickness: data.spec_thickness,
+            preference_class: data.preference_class,
+            use_type: data.use_type,
+            rigid: data.rigid || 'FALSE',
+            top_foil_cu_weight: topArr[i],
+            bot_foil_cu_weight: botArr[i],
+            tg_min: data.tg_min,
+            tg_max: data.tg_max,
+            center_glass: data.center_glass,
+            dk_01g: data.dk_01g,
+            df_01g: data.df_01g,
+            dk_0_001ghz: data.dk_0_001ghz,
+            df_0_001ghz: data.df_0_001ghz,
+            dk_0_01ghz: data.dk_0_01ghz,
+            df_0_01ghz: data.df_0_01ghz,
+            dk_0_02ghz: data.dk_0_02ghz,
+            df_0_02ghz: data.df_0_02ghz,
+            dk_2ghz: data.dk_2ghz,
+            df_2ghz: data.df_2ghz,
+            dk_2_45ghz: data.dk_2_45ghz,
+            df_2_45ghz: data.df_2_45ghz,
+            dk_3ghz: data.dk_3ghz,
+            df_3ghz: data.df_3ghz,
+            dk_4ghz: data.dk_4ghz,
+            df_4ghz: data.df_4ghz,
+            dk_5ghz: data.dk_5ghz,
+            df_5ghz: data.df_5ghz,
+            dk_6ghz: data.dk_6ghz,
+            df_6ghz: data.df_6ghz,
+            dk_7ghz: data.dk_7ghz,
+            df_7ghz: data.df_7ghz,
+            dk_8ghz: data.dk_8ghz,
+            df_8ghz: data.df_8ghz,
+            dk_9ghz: data.dk_9ghz,
+            df_9ghz: data.df_9ghz,
+            dk_10ghz: data.dk_10ghz,
+            df_10ghz: data.df_10ghz,
+            dk_15ghz: data.dk_15ghz,
+            df_15ghz: data.df_15ghz,
+            dk_16ghz: data.dk_16ghz,
+            df_16ghz: data.df_16ghz,
+            dk_20ghz: data.dk_20ghz,
+            df_20ghz: data.df_20ghz,
+            dk_25ghz: data.dk_25ghz,
+            df_25ghz: data.df_25ghz,
+            dk_30ghz: data.dk_30ghz,
+            df_30ghz: data.df_30ghz,
+            dk_35ghz: data.dk_35ghz,
+            df_35ghz: data.df_35ghz,
+            dk_40ghz: data.dk_40ghz,
+            df_40ghz: data.df_40ghz,
+            dk_45ghz: data.dk_45ghz,
+            df_45ghz: data.df_45ghz,
+            dk_50ghz: data.dk_50ghz,
+            df_50ghz: data.df_50ghz,
+            dk_55ghz: data.dk_55ghz,
+            df_55ghz: data.df_55ghz,
+            is_hf: data.is_hf || 'FALSE',
+            data_source: data.data_source,
+            filename: data.filename
+          }
+        });
+      } catch (historyError) {
+        console.error('Warning: Failed to record history:', historyError);
+        // Continue execution even if history recording fails
+      }
+
       createdRecords.push({
         id: nextId,
         ...bindParams
@@ -323,12 +402,12 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     if (updateData.status && !['Approve', 'Cancel', 'Pending'].includes(updateData.status)) {
       return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
-    }    
+    }
     if (updateData.top_foil_cu_weight) {
       if (Array.isArray(updateData.top_foil_cu_weight)) {
         updateData.top_foil_cu_weight = updateData.top_foil_cu_weight[0];
       }
-      
+
       if (!['L', 'H', '1', '2'].includes(updateData.top_foil_cu_weight)) {
         return res.status(400).json({ message: 'Giá trị top_foil_cu_weight không hợp lệ' });
       }
@@ -336,7 +415,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     if (updateData.is_hf && !['TRUE', 'FALSE'].includes(updateData.is_hf)) {
       return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
-    }   
+    }
     const updateFields = [];
     const bindParams = { id };
     const columnMapping = {
@@ -410,7 +489,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       is_hf: 'is_hf',
       data_source: 'data_source',
       filename: 'filename'
-    };    
+    };
     const safeNumber = (value, precision = null) => {
       if (value === '' || value === null || value === undefined) {
         return null;
@@ -422,9 +501,9 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     const integerFields = ['id', 'prepreg_count', 'preference_class', 'tg_min', 'tg_max'];
     const numericPrecisionFields = [
-      'nominal_thickness', 'spec_thickness',  
-      'dk_01g', 'df_01g',                    
-      'dk_0_001ghz', 'df_0_001ghz',         
+      'nominal_thickness', 'spec_thickness',
+      'dk_01g', 'df_01g',
+      'dk_0_001ghz', 'df_0_001ghz',
       'dk_0_01ghz', 'df_0_01ghz',
       'dk_0_02ghz', 'df_0_02ghz',
       'dk_2ghz', 'df_2ghz',
@@ -447,8 +526,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       'dk_45ghz', 'df_45ghz',
       'dk_50ghz', 'df_50ghz',
       'dk_55ghz', 'df_55ghz'
-    ];   
-    
+    ];
+
     Object.keys(updateData).forEach(key => {
       if (updateData[key] !== undefined && columnMapping[key]) {
         const columnName = columnMapping[key];
@@ -469,7 +548,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có dữ liệu cập nhật' });
-    }    const updateQuery = `
+    } const updateQuery = `
       UPDATE material_core 
       SET ${updateFields.join(', ')}
       WHERE id = :id
@@ -484,6 +563,14 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
+
+    // Lưu lịch sử
+    await addHistoryRecord(connection, {
+      materialCoreId: id,
+      actionType: 'UPDATE',
+      data: updateData, // Đổi từ changeDetails sang data
+      createdBy: req.user.username
+    });
 
     res.json({
       message: 'Cập nhật thành công',
@@ -515,13 +602,26 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
         message: 'ID không hợp lệ'
       });
     }
-    id = Number(id); 
+    id = Number(id);
     connection = await database.getConnection();
     const result = await connection.execute(
       `UPDATE material_core SET is_deleted = 1 WHERE id = :id`,
       { id },
       { autoCommit: true }
     );
+
+    if (result.rowsAffected > 0) {
+      // Lưu lịch sử
+      await addHistoryRecord(connection, {
+        materialCoreId: id,
+        actionType: 'DELETE',
+        changeDetails: {
+          description: 'Xóa Material Core'
+        },
+        createdBy: req.user.username
+      });
+    }
+
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
@@ -548,35 +648,35 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
 
 async function createBackupTemplate() {
   console.log('Creating backup template...');
-  
+
   const workbook = new ExcelJS.Workbook();
-  
+
   // Tạo đủ 5 sheets để đảm bảo sheet[4] tồn tại
   for (let i = 0; i < 5; i++) {
     const worksheet = workbook.addWorksheet(`Sheet${i + 1}`);
-    
+
     if (i === 4) { // Sheet thứ 5 (index 4)
       // Tạo title row
       worksheet.getCell('A1').value = 'Material Core Export Template';
       worksheet.getCell('A1').font = { bold: true, size: 14 };
-      
+
       // Tạo header row tại row 2
       const headers = [
         'STT', 'ID', 'Name', 'Description', 'Type', // A-E
         'VENDOR', 'FAMILY', 'PREPREG_COUNT', 'NOMINAL_THICKNESS', 'SPEC_THICKNESS',
         'PREFERENCE_CLASS', 'USE_TYPE', 'RIGID', 'TOP_FOIL_CU_WEIGHT', 'BOT_FOIL_CU_WEIGHT',
-        'TG_MIN', 'TG_MAX', 'CENTER_GLASS', 'DK_01G', 'DF_01G', 
-        'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ', 'DK_0_02GHZ', 
-        'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ', 
-        'DK_3GHZ', 'DF_3GHZ','DK_4GHZ', 'DF_4GHZ', 'DK_5GHZ', 'DF_5GHZ',
+        'TG_MIN', 'TG_MAX', 'CENTER_GLASS', 'DK_01G', 'DF_01G',
+        'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ', 'DK_0_02GHZ',
+        'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ',
+        'DK_3GHZ', 'DF_3GHZ', 'DK_4GHZ', 'DF_4GHZ', 'DK_5GHZ', 'DF_5GHZ',
         'DK_6GHZ', 'DF_6GHZ', 'DK_7GHZ', 'DF_7GHZ', 'DK_8GHZ', 'DF_8GHZ',
-        'DK_9GHZ', 'DF_9GHZ', 'DK_10GHZ', 'DF_10GHZ', 
-        'DK_15GHZ', 'DF_15GHZ', 'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ', 
-        'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ', 'DK_30GHZ', 'DF_30GHZ', 
-        'DK_35GHZ', 'DF_35GHZ', 'DK_40GHZ', 'DF_40GHZ', 'DK_45GHZ', 
-        'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ' 
+        'DK_9GHZ', 'DF_9GHZ', 'DK_10GHZ', 'DF_10GHZ',
+        'DK_15GHZ', 'DF_15GHZ', 'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ',
+        'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ', 'DK_30GHZ', 'DF_30GHZ',
+        'DK_35GHZ', 'DF_35GHZ', 'DK_40GHZ', 'DF_40GHZ', 'DK_45GHZ',
+        'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ'
       ];
-      
+
       // Ghi headers vào row 2
       headers.forEach((header, index) => {
         const cell = worksheet.getCell(2, index + 1);
@@ -594,22 +694,22 @@ async function createBackupTemplate() {
           right: { style: 'thin' }
         };
       });
-      
+
       // Thiết lập độ rộng cột
       worksheet.getColumn('A').width = 5;  // STT
       worksheet.getColumn('B').width = 10; // ID
       worksheet.getColumn('C').width = 20; // Name
       worksheet.getColumn('D').width = 30; // Description
       worksheet.getColumn('E').width = 15; // Type
-      
+
       // Các cột data chính (F-BH)
       for (let col = 6; col <= headers.length; col++) {
         worksheet.getColumn(col).width = 12;
       }
-      
+
       // Freeze panes
       worksheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 2 }];
-      
+
       // Thêm một vài dòng mẫu để test
       worksheet.getCell('A3').value = 1;
       worksheet.getCell('B3').value = 'SAMPLE001';
@@ -618,7 +718,7 @@ async function createBackupTemplate() {
       worksheet.getCell('E3').value = 'Test';
     }
   }
-  
+
   return workbook;
 }
 
@@ -663,18 +763,18 @@ router.post('/export-xlsm', async (req, res) => {
     const ws = workbook.Sheets[sheetName];
 
     const map = [
-      'VENDOR','FAMILY','PREPREG_COUNT','NOMINAL_THICKNESS','SPEC_THICKNESS',
-      'PREFERENCE_CLASS','USE_TYPE','RIGID','TOP_FOIL_CU_WEIGHT','BOT_FOIL_CU_WEIGHT',
-      'TG_MIN','TG_MAX','CENTER_GLASS',
-      null, null, null, null, null, 'DK_01G','DF_01G','DK_0_001GHZ','DF_0_001GHZ','DK_0_01GHZ','DF_0_01GHZ',
-      'DK_0_02GHZ','DF_0_02GHZ','DK_2GHZ','DF_2GHZ','DK_2_45GHZ','DF_2_45GHZ',
-      'DK_3GHZ','DF_3GHZ','DK_4GHZ', 'DF_4GHZ','DK_5GHZ','DF_5GHZ',
-      'DK_6GHZ', 'DF_6GHZ','DK_7GHZ', 'DF_7GHZ',
-      'DK_8GHZ','DF_8GHZ','DK_9GHZ', 'DF_9GHZ','DK_10GHZ','DF_10GHZ','DK_15GHZ','DF_15GHZ',
-      'DK_16GHZ','DF_16GHZ','DK_20GHZ','DF_20GHZ','DK_25GHZ','DF_25GHZ',
-      'DK_30GHZ','DF_30GHZ','DK_35GHZ__','DF_35GHZ__','DK_40GHZ','DF_40GHZ',
-      'DK_45GHZ','DF_45GHZ','DK_50GHZ','DF_50GHZ','DK_55GHZ','DF_55GHZ',
-      'IS_HF','DATA_SOURCE'
+      'VENDOR', 'FAMILY', 'PREPREG_COUNT', 'NOMINAL_THICKNESS', 'SPEC_THICKNESS',
+      'PREFERENCE_CLASS', 'USE_TYPE', 'RIGID', 'TOP_FOIL_CU_WEIGHT', 'BOT_FOIL_CU_WEIGHT',
+      'TG_MIN', 'TG_MAX', 'CENTER_GLASS',
+      null, null, null, null, null, 'DK_01G', 'DF_01G', 'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ',
+      'DK_0_02GHZ', 'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ',
+      'DK_3GHZ', 'DF_3GHZ', 'DK_4GHZ', 'DF_4GHZ', 'DK_5GHZ', 'DF_5GHZ',
+      'DK_6GHZ', 'DF_6GHZ', 'DK_7GHZ', 'DF_7GHZ',
+      'DK_8GHZ', 'DF_8GHZ', 'DK_9GHZ', 'DF_9GHZ', 'DK_10GHZ', 'DF_10GHZ', 'DK_15GHZ', 'DF_15GHZ',
+      'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ', 'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ',
+      'DK_30GHZ', 'DF_30GHZ', 'DK_35GHZ__', 'DF_35GHZ__', 'DK_40GHZ', 'DF_40GHZ',
+      'DK_45GHZ', 'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ',
+      'IS_HF', 'DATA_SOURCE'
     ];
 
     data.forEach((row, idx) => {

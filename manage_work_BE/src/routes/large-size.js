@@ -14,7 +14,27 @@ const AllEmails = [
   'mkvc_pd2@meiko-elec.com',
   'mkvc_pd3@meiko-elec.com',
   'mkvc_pd4@meiko-elec.com',
-  'MKVC_PD5@meiko-elec.com'
+  'MKVC_PD5@meiko-elec.com',
+  'nam.khuatvan@meiko-elec.com',
+  'vinh.hoangxuan@meiko-elec.com',
+  'quyen.can@meiko-elec.com',
+  'thu.dinh@meiko-elec.com',
+  'loan.domai@meiko-elec.com',
+  'phuonganh.bui@meiko-elec.com',
+  'thuy.nguyen1@meiko-elec.com',
+  'thoi.nguyen@meiko-elec.com',
+  'khoi.lecong@meiko-elec.com',
+  'hang.ngo@meiko-elec.com',
+  'vinh.hoangxuan@meiko-elec.com'
+];
+
+const pcEmails = [
+  'nam.khuatvan@meiko-elec.com',
+  'vinh.hoangxuan@meiko-elec.com',
+  'quyen.can@meiko-elec.com',
+  'thu.dinh@meiko-elec.com',
+  'loan.domai@meiko-elec.com',
+  'phuonganh.bui@meiko-elec.com'
 ];
 
 const authenticateToken = (req, res, next) => {
@@ -265,7 +285,7 @@ router.post('/create', async (req, res) => {
     <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
     <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
 `;
-    let recipients = [...AllEmails];
+    let recipients = [...pcEmails];
     if (creatorEmail && !recipients.includes(creatorEmail)) {
       recipients.push(creatorEmail);
     }

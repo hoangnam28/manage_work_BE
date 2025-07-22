@@ -60,68 +60,106 @@ router.get('/list', authenticateToken, async (req, res) => {
 });
 
 // Thêm mới material core
-router.post('/create', async (req, res) => {
+router.post('/create', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
     const data = req.body;
+    
+    console.log('Received data:', data);
 
-    // Get next ID (assuming a sequence or max+1 logic)
+    // Validate required fields
+    const requiredFields = ['VENDOR', 'FAMILY_CORE', 'FAMILY_PP', 'IS_HF', 'IS_CAF'];
+    const missingFields = requiredFields.filter(field => data[field] === undefined || data[field] === '');
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required fields: ${missingFields.join(', ')}`
+      });
+    }
+
+    // Get next ID using sequence
     const idResult = await connection.execute(
-      `SELECT NVL(MAX(id), 0) + 1 AS nextId FROM material_properties`,
+      `SELECT NVL(MAX(id), 0) + 1 AS nextId FROM material_new`,
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
     const nextId = idResult.rows[0].NEXTID;
+    console.log('Generated ID:', nextId);
 
+    // Prepare bind parameters with proper type conversion
     const bindParams = {
       id: nextId,
-      requester_name: data.requester_name,
-      request_date: data.request_date ? new Date(data.request_date) : null,
-      status: data.status || 'Pending',
-      vendor: data.vendor,
-      family_core: data.family_core,
-      family_pp: data.family_pp,
-      is_hf: data.is_hf || 'FALSE',
-      material_type: data.material_type,
-      erp: data.erp,
-      erp_vendor: data.erp_vendor,
-      is_caf: data.is_caf || 'FALSE',
-      tg: data.tg,
-      bord_type: data.bord_type,
-      plastic: data.plastic,
-      file_name: data.file_name,
-      data: JSON.stringify(data.data || {}),
+      requester_name: data.REQUESTER_NAME || '',
+      request_date: data.REQUEST_DATE ? new Date(data.REQUEST_DATE) : new Date(),
+      status: data.STATUS || 'Pending',
+      vendor: data.VENDOR || '',
+      family_core: data.FAMILY_CORE || '',
+      family_pp: data.FAMILY_PP || '',
+      is_hf: Number(data.IS_HF) || 0,
+      material_type: data.MATERIAL_TYPE || '',
+      erp: data.ERP || '',
+      erp_vendor: data.ERP_VENDOR || '',
+      is_caf: Number(data.IS_CAF) || 0,
+      tg: data.TG || '',
+      bord_type: data.BORD_TYPE || '',
+      plastic: data.PLASTIC || '',
+      file_name: data.FILE_NAME || '',
+      data: data.DATA || '',
       is_deleted: 0,
     };
+    
+    console.log('Prepared bind parameters:', bindParams);
 
-    await connection.execute(
-      `INSERT INTO material_properties (
-        id, requester_name, request_date, status, vendor, family_core,
-        family_pp, is_hf, material_type, erp, erp_vendor, pp_type, is_caf,
-        tg, bord_type, plastic, file_name, data,
-        is_deleted
-      ) VALUES (
-        :id, :requester_name, :request_date, :status, :vendor, :family_core,
-        :family_pp, :is_hf, :material_type, :erp, :erp_vendor, :pp_type, :is_caf,
-        :tg, :bord_type, :plastic, :file_name, :data,
-        :is_deleted
-      )`,
-      bindParams,
-      { autoCommit: true }
-    );
+    // Execute insert with proper error handling
+    try {
+      await connection.execute(
+        `INSERT INTO material_new (
+          id, requester_name, request_date, status, vendor, family_core,
+          family_pp, is_hf, material_type, erp, erp_vendor, is_caf,
+          tg, bord_type, plastic, file_name, data,
+          is_deleted
+        ) VALUES (
+          :id, :requester_name, :request_date, :status, :vendor, :family_core,
+          :family_pp, :is_hf, :material_type, :erp, :erp_vendor, :is_caf,
+          :tg, :bord_type, :plastic, :file_name, :data,
+          :is_deleted
+        )`,
+        bindParams,
+        { autoCommit: true }
+      );
 
-    res.status(201).json({
-      success: true,
-      message: 'Material core created successfully',
-      data: { id: nextId, ...bindParams }
-    });
+      // Verify the insert by selecting the new record
+      const verifyResult = await connection.execute(
+        `SELECT * FROM material_new WHERE id = :id`,
+        { id: nextId },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      if (!verifyResult.rows || verifyResult.rows.length === 0) {
+        throw new Error('Record not found after insert');
+      }
+      
+      console.log('Insert successful, verified record:', verifyResult.rows[0]);
+
+      res.status(201).json({
+        success: true,
+        message: 'Thêm mới thành công',
+        data: verifyResult.rows[0]
+      });
+      
+    } catch (insertError) {
+      console.error('Error during insert:', insertError);
+      throw new Error(`Failed to insert record: ${insertError.message}`);
+    }
+    
   } catch (error) {
-    console.error('Error creating material core:', error);
+    console.error('Error creating material:', error);
     res.status(500).json({
       success: false,
-      message: 'Failed to create material core',
-      error: error.message
+      message: 'Lỗi khi thêm mới',
+      error: error.message,
+      details: error.stack
     });
   } finally {
     if (connection) {
@@ -149,15 +187,34 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     connection = await database.getConnection();
 
-    if (updateData.status && !['Approve', 'Cancel', 'Pending'].includes(updateData.status)) {
+    // Chuyển đổi tên trường từ UPPERCASE sang lowercase để khớp với mapping
+    const normalizedUpdateData = {};
+    Object.keys(updateData).forEach(key => {
+      const lowerKey = key.toLowerCase();
+      normalizedUpdateData[lowerKey] = updateData[key];
+    });
+
+    console.log('Original updateData:', updateData);
+    console.log('Normalized updateData:', normalizedUpdateData);
+
+    // Validation với tên trường đã normalize
+    if (normalizedUpdateData.status && !['Approve', 'Cancel', 'Pending'].includes(normalizedUpdateData.status)) {
       return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
     }
 
-    if (updateData.is_hf && !['TRUE', 'FALSE'].includes(updateData.is_hf)) {
+    // Fix validation cho is_hf - should check for 0/1 not TRUE/FALSE
+    if (normalizedUpdateData.is_hf !== undefined && ![0, 1, '0', '1'].includes(normalizedUpdateData.is_hf)) {
       return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
     }
+
+    if (normalizedUpdateData.is_caf !== undefined && ![0, 1, '0', '1'].includes(normalizedUpdateData.is_caf)) {
+      return res.status(400).json({ message: 'Giá trị is_caf không hợp lệ' });
+    }
+
     const updateFields = [];
     const bindParams = { id };
+    
+    // Updated column mapping to match your database schema
     const columnMapping = {
       id: 'ID',
       requester_name: 'requester_name',
@@ -178,6 +235,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       data: 'data',
       is_deleted: 'is_deleted',
     };
+
     const safeNumber = (value, precision = null) => {
       if (value === '' || value === null || value === undefined) {
         return null;
@@ -189,33 +247,56 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     const integerFields = ['id', 'is_hf', 'is_caf', 'is_deleted'];
 
-    Object.keys(updateData).forEach(key => {
-      if (updateData[key] !== undefined && columnMapping[key]) {
+    // Use normalized data for processing
+    Object.keys(normalizedUpdateData).forEach(key => {
+      if (normalizedUpdateData[key] !== undefined && columnMapping[key]) {
         const columnName = columnMapping[key];
         updateFields.push(`${columnName} = :${key}`);
+        
         if (key === 'request_date' || key === 'complete_date') {
-          bindParams[key] = updateData[key] ? new Date(updateData[key]) : null;
+          bindParams[key] = normalizedUpdateData[key] ? new Date(normalizedUpdateData[key]) : null;
         } else if (integerFields.includes(key)) {
-          bindParams[key] = safeNumber(updateData[key]);
-          console.log(`Converting ${key} from`, updateData[key], 'to', bindParams[key]);
+          bindParams[key] = safeNumber(normalizedUpdateData[key]);
+          console.log(`Converting ${key} from`, normalizedUpdateData[key], 'to', bindParams[key]);
         } else {
-          bindParams[key] = updateData[key] || null;
+          bindParams[key] = normalizedUpdateData[key] || null;
         }
+      } else if (normalizedUpdateData[key] !== undefined && !columnMapping[key]) {
+        console.warn(`Field ${key} not found in column mapping`);
       }
     });
 
+    console.log('Update fields:', updateFields);
+    console.log('Bind params:', bindParams);
+
     if (updateFields.length === 0) {
-      return res.status(400).json({ message: 'Không có dữ liệu cập nhật' });
-    } const updateQuery = `
+      return res.status(400).json({ 
+        message: 'Không có dữ liệu cập nhật',
+        debug: {
+          receivedFields: Object.keys(updateData),
+          normalizedFields: Object.keys(normalizedUpdateData),
+          mappedFields: Object.keys(columnMapping)
+        }
+      });
+    }
+
+    const updateQuery = `
       UPDATE material_new
       SET ${updateFields.join(', ')}
       WHERE id = :id
     `;
+
+    console.log('Final update query:', updateQuery);
+
     const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
+
+    console.log('Update result:', result);
 
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
+
+    // Get updated record
     const updatedRecord = await connection.execute(
       `SELECT * FROM material_new WHERE id = :id`,
       { id },
@@ -226,11 +307,13 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       message: 'Cập nhật thành công',
       data: updatedRecord.rows[0]
     });
+
   } catch (err) {
     console.error('Error updating material properties:', err);
     res.status(500).json({
       message: 'Lỗi server',
-      error: err.message
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
     });
   } finally {
     if (connection) {
@@ -242,7 +325,6 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     }
   }
 });
-
 router.delete('/delete/:id', authenticateToken, async (req, res) => {
   let { id } = req.params;
   let connection;
