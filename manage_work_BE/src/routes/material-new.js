@@ -7,7 +7,8 @@ const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
 
-const { authenticateToken, checkEditPermission } = require('../middleware/auth');
+const {addHistoryNewRecord} = require('./material-new-history'); 
+const { authenticateToken } = require('../middleware/auth');
 
 // Lấy danh sách material core
 router.get('/list', authenticateToken, async (req, res) => {
@@ -128,6 +129,31 @@ router.post('/create', authenticateToken, async (req, res) => {
         bindParams,
         { autoCommit: true }
       );
+      try {
+        await addHistoryNewRecord(connection, {
+          materialNewId: nextId,
+          actionType: 'CREATE',
+          createdBy: req.user.username,
+          data: {
+            vendor: data.VENDOR,
+            family_core: data.FAMILY_CORE,
+            family_pp: data.FAMILY_PP,
+            is_hf: data.IS_HF,
+            material_type: data.MATERIAL_TYPE,
+            erp: data.ERP,
+            erp_vendor: data.ERP_VENDOR,
+            tg: data.TG,
+            is_caf: data.IS_CAF,
+            bord_type: data.BORD_TYPE,
+            plastic: data.PLASTIC,
+            file_name: data.FILE_NAME,
+            data: data.DATA
+          }
+        });
+      } catch (historyError) {
+        console.error('Warning: Failed to record history:', historyError);
+        // Continue execution even if history recording fails
+      }
 
       // Verify the insert by selecting the new record
       const verifyResult = await connection.execute(
@@ -303,6 +329,15 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
+    await addHistoryNewRecord(connection, {
+      materialNewId: id,
+      actionType: 'UPDATE',
+      data: updateData, 
+      createdBy: req.user.username
+    });
+
+
+
     res.json({
       message: 'Cập nhật thành công',
       data: updatedRecord.rows[0]
@@ -341,9 +376,23 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
       { id },
       { autoCommit: true }
     );
+
+     if (result.rowsAffected > 0) {
+      // Lưu lịch sử
+      await addHistoryNewRecord(connection, {
+        materialNewId: id,
+        actionType: 'DELETE',
+        changeDetails: {
+          description: 'Xóa Material PP'
+        },
+        createdBy: req.user.username
+      });
+    }
     if (result.rowsAffected === 0) {
+
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
+    
     res.json({
       message: 'Xóa mềm thành công',
       id: id

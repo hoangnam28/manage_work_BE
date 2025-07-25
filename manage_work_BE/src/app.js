@@ -13,6 +13,7 @@ const materialNewRoutes = require('./routes/material-new');
 const largeSize = require('./routes/large-size');
 const { router: materialCoreHistoryRouter } = require('./routes/material-core-history');
 const { router: materialPPHistoryRoutes } = require('./routes/material-pp-history');
+const { router: materialNewHistoryRoutes } = require('./routes/material-new-history');
 const path = require('path');
 const fs = require('fs');
 const app = express();
@@ -62,8 +63,10 @@ app.use('/api/large-size', largeSize);
 app.use('/api/material-new', materialNewRoutes);
 
 app.use('/api/material-core-history', materialCoreHistoryRouter);
-
+  
 app.use('/api/material-pp-history', materialPPHistoryRoutes);
+
+app.use('/api/material-new-history', materialNewHistoryRoutes);
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
