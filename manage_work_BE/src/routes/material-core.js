@@ -9,11 +9,177 @@ const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
 
-const { authenticateToken, checkEditPermission } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const { addHistoryRecord } = require('./material-core-history');
 
 // Lấy danh sách material core
 router.get('/list', authenticateToken, async (req, res) => {
+  let connection;
+  try {
+    // Lấy parameters từ query string
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 100;
+    const search = req.query.search || '';
+    
+    // Tính offset
+    const offset = (page - 1) * pageSize;
+    
+    connection = await database.getConnection();
+    
+    // Query để đếm tổng số records
+    let countQuery = `
+      SELECT COUNT(*) as total 
+      FROM material_core 
+      WHERE is_deleted = 0
+    `;
+    
+    // Query chính với pagination sử dụng ROW_NUMBER()
+    let mainQuery = `
+      SELECT * FROM (
+        SELECT a.*, ROW_NUMBER() OVER (ORDER BY id DESC) as rn FROM (
+          SELECT 
+            id,
+            requester_name,
+            request_date,
+            handler,
+            status,
+            complete_date,
+            vendor,
+            family,
+            prepreg_count,
+            nominal_thickness,
+            spec_thickness,
+            preference_class,
+            use_type,
+            rigid,
+            top_foil_cu_weight,
+            bot_foil_cu_weight,
+            tg_min,
+            tg_max,
+            center_glass,
+            DK_0_001GHZ_ as dk_0_001ghz,
+            DF_0_001GHZ_ as df_0_001ghz,
+            DK_0_01GHZ_ as dk_0_01ghz,
+            DF_0_01GHZ_ as df_0_01ghz,
+            DK_0_02GHZ_ as dk_0_02ghz,
+            DF_0_02GHZ_ as df_0_02ghz,
+            DK_2GHZ_ as dk_2ghz,
+            DF_2GHZ_ as df_2ghz,
+            DK_2_45GHZ_ as dk_2_45ghz,
+            DF_2_45GHZ_ as df_2_45ghz,
+            DK_3GHZ_ as dk_3ghz,
+            DF_3GHZ_ as df_3ghz,
+            DK_4GHZ_ as dk_4ghz,
+            DF_4GHZ_ as df_4ghz,
+            DK_5GHZ_ as dk_5ghz,
+            DF_5GHZ_ as df_5ghz,
+            DK_6GHZ_ as dk_6ghz,
+            DF_6GHZ_ as df_6ghz,
+            DK_7GHZ_ as dk_7ghz,
+            DF_7GHZ_ as df_7ghz,
+            DK_8GHZ_ as dk_8ghz,
+            DF_8GHZ_ as df_8ghz,
+            DK_9GHZ_ as dk_9ghz,
+            DF_9GHZ_ as df_9ghz,
+            DK_10GHZ_ as dk_10ghz,
+            DF_10GHZ_ as df_10ghz,
+            DK_15GHZ_ as dk_15ghz,
+            DF_15GHZ_ as df_15ghz,
+            DK_16GHZ_ as dk_16ghz,
+            DF_16GHZ_ as df_16ghz,
+            DK_20GHZ_ as dk_20ghz,
+            DF_20GHZ_ as df_20ghz,
+            DK_01G as dk_01g,
+            DF_01G as df_01g,
+            DK_25GHZ_ as dk_25ghz,
+            DF_25GHZ_ as df_25ghz,
+            DK_30GHZ_ as dk_30ghz,
+            DF_30GHZ_ as df_30ghz,
+            DK_35GHZ__ as dk_35ghz,
+            DF_35GHZ__ as df_35ghz,
+            DK_40GHZ_ as dk_40ghz,
+            DF_40GHZ_ as df_40ghz,
+            DK_45GHZ_ as dk_45ghz,
+            DF_45GHZ_ as df_45ghz,
+            DK_50GHZ_ as dk_50ghz,
+            DF_50GHZ_ as df_50ghz,
+            DK_55GHZ_ as dk_55ghz,
+            DF_55GHZ_ as df_55ghz,
+            is_hf,
+            data_source,
+            filename
+          FROM material_core 
+          WHERE is_deleted = 0
+    `;
+    
+    // Thêm điều kiện search nếu có
+    const bindParams = {};
+    if (search) {
+      mainQuery += ` AND (
+        UPPER(requester_name) LIKE UPPER(:search) OR
+        UPPER(vendor) LIKE UPPER(:search) OR
+        UPPER(family) LIKE UPPER(:search) OR
+        UPPER(handler) LIKE UPPER(:search)
+      )`;
+      countQuery += ` AND (
+        UPPER(requester_name) LIKE UPPER(:search) OR
+        UPPER(vendor) LIKE UPPER(:search) OR
+        UPPER(family) LIKE UPPER(:search) OR
+        UPPER(handler) LIKE UPPER(:search)
+      )`;
+      bindParams.search = `%${search}%`;
+    }
+    
+    // Hoàn thiện query với pagination
+    mainQuery += `
+        ) a
+      ) 
+      WHERE rn > :offset AND rn <= :limit`;
+    
+    bindParams.offset = offset;
+    bindParams.limit = offset + pageSize;
+    
+    // Thực hiện cả 2 query song song
+    const [countResult, dataResult] = await Promise.all([
+      connection.execute(countQuery, search ? { search: bindParams.search } : {}, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
+      connection.execute(mainQuery, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT })
+    ]);
+    
+    const totalRecords = countResult.rows[0].TOTAL;
+    const totalPages = Math.ceil(totalRecords / pageSize);
+    
+    console.log(`Page: ${page}, PageSize: ${pageSize}, Total: ${totalRecords}, Returned: ${dataResult.rows.length}`);
+    
+    res.json({
+      data: dataResult.rows,
+      pagination: {
+        currentPage: page,
+        pageSize: pageSize,
+        totalRecords: totalRecords,
+        totalPages: totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
+    });
+  } catch (err) {
+    console.error('Error in /list route:', err);
+    res.status(500).json({
+      message: 'Lỗi server',
+      error: err.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+// Route để lấy tất cả dữ liệu (cho export)
+router.get('/all', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
@@ -98,7 +264,7 @@ router.get('/list', authenticateToken, async (req, res) => {
       data: result.rows
     });
   } catch (err) {
-    console.error('Error in /list route:', err);
+    console.error('Error in /all route:', err);
     res.status(500).json({
       message: 'Lỗi server',
       error: err.message
@@ -113,6 +279,7 @@ router.get('/list', authenticateToken, async (req, res) => {
     }
   }
 });
+
 
 // Thêm mới material core
 router.post('/create', authenticateToken, async (req, res) => {
@@ -525,7 +692,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       'dk_40ghz', 'df_40ghz',
       'dk_45ghz', 'df_45ghz',
       'dk_50ghz', 'df_50ghz',
-      'dk_55ghz', 'df_55ghz'
+      'dk_55ghz'
     ];
 
     Object.keys(updateData).forEach(key => {
@@ -817,6 +984,248 @@ router.post('/export-xlsm', async (req, res) => {
       error: err.message,
       suggestion: 'Kiểm tra template file và định dạng dữ liệu input'
     });
+  }
+});
+
+// Hàm chuyển key về lowercase (chuẩn hóa key từ Excel)
+function normalizeKeys(obj) {
+  const newObj = {};
+  Object.keys(obj).forEach(key => {
+    newObj[key.toLowerCase()] = obj[key];
+  });
+  return newObj;
+}
+
+// Hàm mapping tên cột Excel sang tên cột DB
+function mapExcelKeysToDbKeys(item) {
+  const newItem = { ...item };
+  
+  // Mapping cụ thể cho các trường đặc biệt
+  const columnMapping = {
+    'NOMINAL_THICKNESS_': 'NOMINAL_THICKNESS',
+    'SPEC_THK_': 'SPEC_THICKNESS', 
+    'DATA_SOURCE_': 'DATA_SOURCE',
+    'H_USE_TYPE_': 'USE_TYPE',
+    'DK_01G_' : 'DK_01G',
+    'DF_01G_' : 'DF_01G',
+    'DK_2_45GHz_': 'DK_2_45GHZ',
+    'DF_2_45GHz_': 'DF_2_45GHZ',
+    'DK_0_001GHz_': 'DK_0_001GHZ',
+    'DF_0_001GHz_': 'DF_0_001GHZ',
+    'DK_0_01GHz_': 'DK_0_01GHZ',
+    'DF_0_01GHz_': 'DF_0_01GHZ',
+    'DK_0_02GHz_': 'DK_0_02GHZ',
+    'DF_0_02GHz_': 'DF_0_02GHZ',
+    'DK_2GHz_': 'DK_2GHZ',
+    'DF_2GHz_': 'DF_2GHZ',
+    'DK_3GHz_': 'DK_3GHZ',
+    'DF_3GHz_': 'DF_3GHZ',
+    'DK_4GHz_': 'DK_4GHZ',
+    'DF_4GHz_': 'DF_4GHZ',
+    'DK_5GHz_': 'DK_5GHZ',
+    'DF_5GHz_': 'DF_5GHZ',
+    'DK_8GHz_': 'DK_8GHZ',
+    'DF_8GHz_': 'DF_8GHZ',
+    'DK_10GHz_': 'DK_10GHZ',
+    'DF_10GHz_': 'DF_10GHZ',
+    'DK_15GHz_': 'DK_15GHZ',
+    'DF_15GHz_': 'DF_15GHZ',
+    'DK_16GHz_': 'DK_16GHZ',
+    'DF_16GHz_': 'DF_16GHZ'
+  };
+
+  // Áp dụng mapping
+  Object.keys(columnMapping).forEach(excelKey => {
+    if (newItem[excelKey] !== undefined) {
+      newItem[columnMapping[excelKey]] = newItem[excelKey];
+      delete newItem[excelKey];
+    }
+  });
+
+  // Bỏ qua các cột không cần thiết
+  const ignoreColumns = ['Date', 'Lí do cập nhật', 'Người xử lý', 'Trạng thái', 'Ngày hoàn thành'];
+  ignoreColumns.forEach(col => {
+    delete newItem[col];
+  });
+
+  // Chuẩn hóa về lowercase
+  const normalized = normalizeKeys(newItem);
+  
+  // Xử lý các trường DK/DF có dấu _ cuối nếu cần
+  Object.keys(normalized).forEach(key => {
+    if (/_(ghz)$/.test(key) && !key.endsWith('_ghz_')) {
+      const newKey = key + '_';
+      normalized[newKey] = normalized[key];
+      delete normalized[key];
+    }
+  });
+  
+  return normalized;
+}
+
+// Hàm lấy danh sách giá trị hợp lệ cho Cu Weight
+function getValidCuWeightList(value) {
+  if (!value) return ['Z'];
+  return value
+    .toString()
+    .split(/[\n,]+/)
+    .map(v => v.trim())
+    .filter(v => ['L', 'H', '1', '2', 'Z'].includes(v));
+}
+
+// Đổi từ GET sang POST, nhận data từ body
+router.post('/import-material-core', async (req, res) => {
+  let connection;
+  try {
+    const { data } = req.body;
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      return res.status(400).json({ message: 'Invalid data format' });
+    }
+    connection = await database.getConnection();
+    const createdRecords = [];
+    for (let i = 0; i < data.length; i++) {
+      // Normalize key và mapping DK/DF key nếu thiếu dấu _ cuối
+      const item = mapExcelKeysToDbKeys(data[i]);
+      const topArr = getValidCuWeightList(item.top_foil_cu_weight);
+      const botArr = getValidCuWeightList(item.bot_foil_cu_weight);
+      const maxLen = Math.max(topArr.length, botArr.length);
+      for (let j = 0; j < maxLen; j++) {
+        const result = await connection.execute(
+          `SELECT material_core_seq.NEXTVAL FROM DUAL`
+        );
+        const nextId = result.rows[0][0];
+        const bindParams = {
+          id: nextId,
+          requester_name: item.requester_name,
+          request_date: item.request_date,
+          handler: item.handler,
+          status: item.status || 'Pending',
+          complete_date: item.complete_date,
+          vendor: item.vendor,
+          family: item.family,
+          prepreg_count: item.prepreg_count,
+          nominal_thickness: item.nominal_thickness,
+          spec_thickness: item.spec_thickness,
+          preference_class: item.preference_class,
+          use_type: item.use_type,
+          rigid: item.rigid,
+          top_foil_cu_weight: topArr[j] || 'Z',
+          bot_foil_cu_weight: botArr[j] || 'Z',
+          tg_min: item.tg_min,
+          tg_max: item.tg_max,
+          center_glass: item.center_glass,
+          dk_01g: item.dk_01g,
+          df_01g: item.df_01g,
+          dk_0_001ghz: item.dk_0_001ghz,
+          df_0_001ghz: item.df_0_001ghz,
+          dk_0_01ghz: item.dk_0_01ghz,
+          df_0_01ghz: item.df_0_01ghz,
+          dk_0_02ghz: item.dk_0_02ghz,
+          df_0_02ghz: item.df_0_02ghz,
+          dk_2ghz: item.dk_2ghz,
+          df_2ghz: item.df_2ghz,
+          dk_2_45ghz: item.dk_2_45ghz,
+          df_2_45ghz: item.df_2_45ghz,
+          dk_3ghz: item.dk_3ghz,
+          df_3ghz: item.df_3ghz,
+          dk_4ghz: item.dk_4ghz,
+          df_4ghz: item.df_4ghz,
+          dk_5ghz: item.dk_5ghz,
+          df_5ghz: item.df_5ghz,
+          dk_6ghz: item.dk_6ghz,
+          df_6ghz: item.df_6ghz,
+          dk_7ghz: item.dk_7ghz,
+          df_7ghz: item.df_7ghz,
+          dk_8ghz: item.dk_8ghz,
+          df_8ghz: item.df_8ghz,
+          dk_9ghz: item.dk_9ghz,
+          df_9ghz: item.df_9ghz,
+          dk_10ghz: item.dk_10ghz,
+          df_10ghz: item.df_10ghz,
+          dk_15ghz: item.dk_15ghz,
+          df_15ghz: item.df_15ghz,
+          dk_16ghz: item.dk_16ghz,
+          df_16ghz: item.df_16ghz,
+          dk_20ghz: item.dk_20ghz,
+          df_20ghz: item.df_20ghz,
+          is_hf: item.is_hf,
+          data_source: item.data_source,
+          filename: item.filename
+        };
+        await connection.execute(
+          `INSERT INTO material_core (
+            id, requester_name, request_date, handler, status, complete_date,
+            vendor, family, prepreg_count, nominal_thickness, spec_thickness,
+            preference_class, use_type, rigid, top_foil_cu_weight, bot_foil_cu_weight,
+            tg_min, tg_max, center_glass,
+            DK_01G, DF_01G,
+            DK_0_001GHZ_, DF_0_001GHZ_,
+            DK_0_01GHZ_, DF_0_01GHZ_,
+            DK_0_02GHZ_, DF_0_02GHZ_,
+            DK_2GHZ_, DF_2GHZ_,
+            DK_2_45GHZ_, DF_2_45GHZ_,
+            DK_3GHZ_, DF_3GHZ_,
+            DK_4GHZ_, DF_4GHZ_,
+            DK_5GHZ_, DF_5GHZ_,
+            DK_6GHZ_, DF_6GHZ_,
+            DK_7GHZ_, DF_7GHZ_,
+            DK_8GHZ_, DF_8GHZ_,
+            DK_9GHZ_, DF_9GHZ_,
+            DK_10GHZ_, DF_10GHZ_,
+            DK_15GHZ_, DF_15GHZ_,
+            DK_16GHZ_, DF_16GHZ_,
+            DK_20GHZ_, DF_20GHZ_,
+            is_hf, data_source, filename
+          ) VALUES (
+            :id, :requester_name, :request_date, :handler, :status, :complete_date,
+            :vendor, :family, :prepreg_count, :nominal_thickness, :spec_thickness,
+            :preference_class, :use_type, :rigid, :top_foil_cu_weight, :bot_foil_cu_weight,
+            :tg_min, :tg_max, :center_glass,
+            :dk_01g, :df_01g,
+            :dk_0_001ghz, :df_0_001ghz,
+            :dk_0_01ghz, :df_0_01ghz,
+            :dk_0_02ghz, :df_0_02ghz,
+            :dk_2ghz, :df_2ghz,
+            :dk_2_45ghz, :df_2_45ghz,
+            :dk_3ghz, :df_3ghz,
+            :dk_4ghz, :df_4ghz,
+            :dk_5ghz, :df_5ghz,
+            :dk_6ghz, :df_6ghz,
+            :dk_7ghz, :df_7ghz,
+            :dk_8ghz, :df_8ghz,
+            :dk_9ghz, :df_9ghz,
+            :dk_10ghz, :df_10ghz,
+            :dk_15ghz, :df_15ghz,
+            :dk_16ghz, :df_16ghz,
+            :dk_20ghz, :df_20ghz,
+            :is_hf, :data_source, :filename
+          )`,
+          bindParams,
+          { autoCommit: true }
+        );
+        createdRecords.push({ id: nextId, ...bindParams });
+      }
+    }
+    res.status(201).json({
+      success: true,
+      message: 'Import thành công',
+      data: createdRecords
+    });
+  } catch (error) {
+    console.error('Error importing material core:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to import material core',
+      error: error.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
   }
 });
 
