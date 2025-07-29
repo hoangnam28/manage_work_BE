@@ -639,4 +639,183 @@ router.post('/export-xlsm', async (req, res) => {
 });
 
 
+
+router.post('/import-material-pp', async (req, res) => {
+  let connection;
+
+  try {
+    const { data } = req.body;
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      return res.status(400).json({ message: 'Invalid data format' });
+    }
+
+    connection = await database.getConnection();
+    const createdRecords = [];
+
+    const safeValue = (value, type = 'string') => {
+      if (value === null || value === undefined || value === '') return null;
+
+      switch (type) {
+        case 'number':
+          const num = parseFloat(value);
+          return isNaN(num) ? null : num;
+        case 'date':
+          if (value instanceof Date) return value;
+          const date = new Date(value);
+          return isNaN(date.getTime()) ? null : date;
+        default:
+          return String(value).trim();
+      }
+    };
+  const normalizeIsHf = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const normalized = String(value).trim().toUpperCase();
+  return (normalized === 'TRUE' || normalized === 'FALSE') ? normalized : null;
+};
+
+const mapExcelKeysToDbKeys = (excelRow) => ({
+  name: safeValue(excelRow.NAME),
+  request_date: safeValue(excelRow.REQUEST_DATE, 'date'),
+  handler: safeValue(excelRow.HANDLER),
+  status: safeValue(excelRow.STATUS) || 'Pending',
+  complete_date: safeValue(excelRow.COMPLETE_DATE, 'date'),
+  vendor: safeValue(excelRow.VENDOR),
+  family: safeValue(excelRow.FAMILY),
+  glass_style: safeValue(excelRow.GLASS_STYLE),
+  resin_percentage: safeValue(excelRow.RESIN_PERCENTAGE, 'number'),
+  rav_thickness: safeValue(excelRow.RAV_THICKNESS),
+  preference_class: safeValue(excelRow.PREFERENCE_CLASS_, 'number'),
+  use_type: safeValue(excelRow.H_USE_TYPE_),
+  pp_type: safeValue(excelRow.PP_TYPE_),
+  tg_min: safeValue(excelRow.TG_MIN, 'number'),
+  tg_max: safeValue(excelRow.TG_MAX, 'number'),
+  dk_01g: safeValue(excelRow.DK_01G_, 'number'),
+  df_01g: safeValue(excelRow.DF_01G_, 'number'),
+  dk_0_001ghz: safeValue(excelRow['DK_0_001GHz_'], 'number'),
+  df_0_001ghz: safeValue(excelRow['DF_0_001GHz_'], 'number'),
+  dk_0_01ghz: safeValue(excelRow['DK_0_01MHz_'], 'number'),
+  df_0_01ghz: safeValue(excelRow['DF_0_01GHz_'], 'number'),
+  dk_0_02ghz: safeValue(excelRow['DK_0_02MHz_'], 'number'),
+  df_0_02ghz: safeValue(excelRow['DF_0_02GHz_'], 'number'),
+  dk_2ghz: safeValue(excelRow['DK_2G_'], 'number'),
+  df_2ghz: safeValue(excelRow['DF_2G_'], 'number'),
+  dk_2_45ghz: safeValue(excelRow['DK_2.45G_'], 'number'),
+  df_2_45ghz: safeValue(excelRow['DF_2.45G_'], 'number'),
+  dk_3ghz: safeValue(excelRow['DK_3G_'], 'number'),
+  df_3ghz: safeValue(excelRow['DF_3G_'], 'number'),
+  dk_4ghz: safeValue(excelRow['DK_4G_'], 'number'),
+  df_4ghz: safeValue(excelRow['DF_4G_'], 'number'),
+  dk_5ghz: safeValue(excelRow['DK_5G_'], 'number'),
+  df_5ghz: safeValue(excelRow['DF_5G_'], 'number'),
+  dk_6ghz: safeValue(excelRow['DK_6G_'], 'number'),
+  df_6ghz: safeValue(excelRow['DF_6G_'], 'number'),
+  dk_7ghz: safeValue(excelRow['DK_7G_'], 'number'),
+  df_7ghz: safeValue(excelRow['DF_7G_'], 'number'),
+  dk_8ghz: safeValue(excelRow['DK_8G_'], 'number'),
+  df_8ghz: safeValue(excelRow['DF_8G_'], 'number'),
+  dk_9ghz: safeValue(excelRow['DK_9G_'], 'number'),
+  df_9ghz: safeValue(excelRow['DF_9G_'], 'number'),
+  dk_10ghz: safeValue(excelRow['DK_10G_'], 'number'),
+  df_10ghz: safeValue(excelRow['DF_10G_'], 'number'),
+  dk_15ghz: safeValue(excelRow['DK_15G_'], 'number'),
+  df_15ghz: safeValue(excelRow['DF_15G_'], 'number'),
+  dk_16ghz: safeValue(excelRow['DK_16G_'], 'number'),
+  df_16ghz: safeValue(excelRow['DF_16G_'], 'number'),
+  dk_20ghz: safeValue(excelRow['DK_20G_'], 'number'),
+  df_20ghz: safeValue(excelRow['DF_20G_'], 'number'),
+  dk_25ghz: safeValue(excelRow['DK_25G_'], 'number'),
+  df_25ghz: safeValue(excelRow['DF_25G_'], 'number'),
+  is_hf: normalizeIsHf(excelRow.IS_HF_),
+  data_source: safeValue(excelRow.DATA_SOURCE_),
+  filename: safeValue(excelRow.Filename)
+});
+
+
+    for (let i = 0; i < data.length; i++) {
+      const item = mapExcelKeysToDbKeys(data[i]);
+
+      const bindParams = {
+        ...item
+      };
+
+      await connection.execute(
+        `INSERT INTO material_properties (
+          name, request_date, handler, status, complete_date,
+          vendor, family, glass_style, resin_percentage, rav_thickness,
+          preference_class, use_type, pp_type, tg_min, tg_max,
+          DK_01G, DF_01G,
+          DK_0_001GHZ_, DF_0_001GHZ_,
+          DK_0_01GHZ_, DF_0_01GHZ_,
+          DK_0_02GHZ_, DF_0_02GHZ_,
+          DK_2GHZ_, DF_2GHZ_,
+          DK_2_45GHZ_, DF_2_45GHZ_,
+          DK_3GHZ_, DF_3GHZ_,
+          DK_4GHZ_, DF_4GHZ_,
+          DK_5GHZ_, DF_5GHZ_,
+          DK_6GHZ_, DF_6GHZ_,
+          DK_7GHZ_, DF_7GHZ_,
+          DK_8GHZ_, DF_8GHZ_,
+          DK_9GHZ_, DF_9GHZ_,
+          DK_10GHZ_, DF_10GHZ_,
+          DK_15GHZ_, DF_15GHZ_,
+          DK_16GHZ_, DF_16GHZ_,
+          DK_20GHZ_, DF_20GHZ_,
+          DK_25GHZ_, DF_25GHZ_,
+          is_hf, data_source, filename
+        ) VALUES (
+          :name, :request_date, :handler, :status, :complete_date,
+          :vendor, :family, :glass_style, :resin_percentage, :rav_thickness,
+          :preference_class, :use_type, :pp_type, :tg_min, :tg_max,
+          :dk_01g, :df_01g,
+          :dk_0_001ghz, :df_0_001ghz,
+          :dk_0_01ghz, :df_0_01ghz,
+          :dk_0_02ghz, :df_0_02ghz,
+          :dk_2ghz, :df_2ghz,
+          :dk_2_45ghz, :df_2_45ghz,
+          :dk_3ghz, :df_3ghz,
+          :dk_4ghz, :df_4ghz,
+          :dk_5ghz, :df_5ghz,
+          :dk_6ghz, :df_6ghz,
+          :dk_7ghz, :df_7ghz,
+          :dk_8ghz, :df_8ghz,
+          :dk_9ghz, :df_9ghz,
+          :dk_10ghz, :df_10ghz,
+          :dk_15ghz, :df_15ghz,
+          :dk_16ghz, :df_16ghz,
+          :dk_20ghz, :df_20ghz,
+          :dk_25ghz, :df_25ghz,
+          :is_hf, :data_source, :filename
+        )`,
+        bindParams,
+        { autoCommit: true }
+      );
+
+      createdRecords.push(bindParams);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Import thành công',
+      data: createdRecords
+    });
+
+  } catch (error) {
+    console.error('Error importing material_pp:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Import thất bại',
+      error: error.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
+
+
 module.exports = router;
