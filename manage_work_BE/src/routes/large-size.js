@@ -11,31 +11,11 @@ oracledb.autoCommit = true;
 
 
 const AllEmails = [
-  'mkvc_pd2@meiko-elec.com',
-  'mkvc_pd3@meiko-elec.com',
-  'mkvc_pd4@meiko-elec.com',
-  'MKVC_PD5@meiko-elec.com',
-  'nam.khuatvan@meiko-elec.com',
-  'vinh.hoangxuan@meiko-elec.com',
-  'quyen.can@meiko-elec.com',
-  'thu.dinh@meiko-elec.com',
-  'loan.domai@meiko-elec.com',
-  'phuonganh.bui@meiko-elec.com',
-  'thuy.nguyen1@meiko-elec.com',
-  'thoi.nguyen@meiko-elec.com',
-  'khoi.lecong@meiko-elec.com',
-  'hang.ngo@meiko-elec.com',
-  'vinh.hoangxuan@meiko-elec.com'
+  'nam.nguyenhoang@meiko-elec.com',
+  'trang.nguyenkieu@meiko-elec.com'
 ];
 
-const pcEmails = [
-  'nam.khuatvan@meiko-elec.com',
-  'vinh.hoangxuan@meiko-elec.com',
-  'quyen.can@meiko-elec.com',
-  'thu.dinh@meiko-elec.com',
-  'loan.domai@meiko-elec.com',
-  'phuonganh.bui@meiko-elec.com'
-];
+
 
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -285,7 +265,7 @@ router.post('/create', async (req, res) => {
     <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
     <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
 `;
-    let recipients = [...pcEmails];
+    let recipients = [...AllEmails];
     if (creatorEmail && !recipients.includes(creatorEmail)) {
       recipients.push(creatorEmail);
     }
@@ -400,25 +380,26 @@ router.put('/update/:id', async (req, res) => {
 
     await connection.execute(
       `INSERT INTO large_size_history (
-        history_id, id, type_board, size_normal, rate_normal, size_big, rate_big, 
-        request, confirm_by, note, customer_code, is_deleted, created_by_email, 
-        action_by_email, action_at, action_type
-      ) VALUES (
-        :history_id, :id, :type_board, :size_normal, :rate_normal, :size_big, :rate_big,
-        :request, :confirm_by, :note, :customer_code, :is_deleted, :created_by_email,
-        :action_by_email, CURRENT_TIMESTAMP, 'UPDATE'
-      )`,
+    history_id, id, type_board, size_normal, rate_normal, size_big, rate_big, 
+    request, confirm_by, note, customer_code, is_deleted, created_by_email, 
+    action_by_email, action_at, action_type
+  ) VALUES (
+    :history_id, :id, :type_board, :size_normal, :rate_normal, :size_big, :rate_big,
+    :request, :confirm_by, :note, :customer_code, :is_deleted, :created_by_email,
+    :action_by_email, CURRENT_TIMESTAMP, 'UPDATE'
+  )`,
       {
         history_id: historyId,
         id: id,
-        type_board: oldRow.TYPE_BOARD || '',
-        size_normal: oldRow.SIZE_NORMAL || '',
-        rate_normal: oldRow.RATE_NORMAL || '',
-        size_big: oldRow.SIZE_BIG || '',
-        rate_big: oldRow.RATE_BIG || '',
-        request: oldRow.REQUEST || '',
-        confirm_by: oldRow.CONFIRM_BY || '',
-        note: oldRow.NOTE || '',
+        // Lưu giá trị MỚI nếu có update, nếu không thì lưu giá trị cũ
+        type_board: typeof type_board !== 'undefined' ? type_board : (oldRow.TYPE_BOARD || ''),
+        size_normal: typeof size_normal !== 'undefined' ? size_normal : (oldRow.SIZE_NORMAL || ''),
+        rate_normal: typeof rate_normal !== 'undefined' ? rate_normal : (oldRow.RATE_NORMAL || ''),
+        size_big: typeof size_big !== 'undefined' ? size_big : (oldRow.SIZE_BIG || ''),
+        rate_big: typeof rate_big !== 'undefined' ? rate_big : (oldRow.RATE_BIG || ''),
+        request: typeof request !== 'undefined' ? request : (oldRow.REQUEST || ''),
+        confirm_by: typeof confirm_by !== 'undefined' ? confirm_by : (oldRow.CONFIRM_BY || ''), // ← Sửa ở đây
+        note: typeof note !== 'undefined' ? note : (oldRow.NOTE || ''),
         customer_code: oldRow.CUSTOMER_CODE || '',
         is_deleted: 0,
         created_by_email: oldRow.CREATED_BY_EMAIL || '',
@@ -560,15 +541,15 @@ router.put('/update/:id', async (req, res) => {
     // }
 
     // Gửi mail khi thay đổi trường request (Có <-> Không), giữ nguyên trạng thái và người xác nhận
-if (
-  typeof request !== 'undefined' &&
-  oldRequest !== null &&
-  oldRequest !== '' &&
-  String(oldRequest).toUpperCase() !== String(request).toUpperCase() &&
-  oldRow.CONFIRM_BY && 
-  oldRow.CONFIRM_BY.trim() !== '' &&
-  !hasImportantChange // Thêm điều kiện này
-) {
+    if (
+      typeof request !== 'undefined' &&
+      oldRequest !== null &&
+      oldRequest !== '' &&
+      String(oldRequest).toUpperCase() !== String(request).toUpperCase() &&
+      oldRow.CONFIRM_BY &&
+      oldRow.CONFIRM_BY.trim() !== '' &&
+      !hasImportantChange // Thêm điều kiện này
+    ) {
       let userName = req.user && req.user.username ? req.user.username : '';
       if (userName) {
         await connection.execute(
@@ -717,20 +698,20 @@ router.put('/restore/:id', async (req, res) => {
     }
     id = Number(id);
     connection = await database.getConnection();
-    
+
     // Lấy thông tin bản ghi trước khi khôi phục
     const oldResult = await connection.execute(
       `SELECT * FROM large_size WHERE id = :id`,
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     if (oldResult.rows.length === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
-    
+
     const oldRow = oldResult.rows[0];
-    
+
     // Lấy email của user hiện tại
     let actionByEmail = null;
     if (req.user && req.user.userId) {
@@ -747,7 +728,7 @@ router.put('/restore/:id', async (req, res) => {
         console.error('Error fetching user email:', userError);
       }
     }
-    
+
     // Lưu lịch sử trước khi khôi phục
     const historyIdResult = await connection.execute(`SELECT large_size_history_seq.NEXTVAL as ID FROM DUAL`);
     const historyId = historyIdResult.rows[0][0];
@@ -780,15 +761,15 @@ router.put('/restore/:id', async (req, res) => {
       },
       { autoCommit: false }
     );
-    
+
     const result = await connection.execute(
       `UPDATE large_size SET is_deleted = 0 WHERE id = :id`,
       { id },
       { autoCommit: false }
     );
-    
+
     await connection.commit();
-    
+
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
@@ -847,7 +828,7 @@ router.get('/history/:id', async (req, res) => {
   try {
     const { id } = req.params;
     connection = await database.getConnection();
-    
+
     const result = await connection.execute(
       `SELECT 
         history_id,
@@ -872,7 +853,7 @@ router.get('/history/:id', async (req, res) => {
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     res.json(result.rows);
   } catch (err) {
     console.error('Error fetching history:', err);

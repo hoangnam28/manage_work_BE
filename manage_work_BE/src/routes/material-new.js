@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
 
-const {addHistoryNewRecord} = require('./material-new-history'); 
+const { addHistoryNewRecord } = require('./material-new-history');
 const { authenticateToken } = require('../middleware/auth');
 
 // Lấy danh sách material core
@@ -26,6 +26,7 @@ router.get('/list', authenticateToken, async (req, res) => {
         is_hf,
         material_type,
         erp,
+        erp_pp,
         erp_vendor,
         is_caf,
         tg,
@@ -66,7 +67,7 @@ router.post('/create', authenticateToken, async (req, res) => {
   try {
     connection = await database.getConnection();
     const data = req.body;
-    
+
     console.log('Received data:', data);
 
     // Validate required fields
@@ -100,6 +101,7 @@ router.post('/create', authenticateToken, async (req, res) => {
       is_hf: Number(data.IS_HF) || 0,
       material_type: data.MATERIAL_TYPE || '',
       erp: data.ERP || '',
+      erp_pp: data.ERP_PP || '',
       erp_vendor: data.ERP_VENDOR || '',
       is_caf: Number(data.IS_CAF) || 0,
       tg: data.TG || '',
@@ -109,7 +111,7 @@ router.post('/create', authenticateToken, async (req, res) => {
       data: data.DATA || '',
       is_deleted: 0,
     };
-    
+
     console.log('Prepared bind parameters:', bindParams);
 
     // Execute insert with proper error handling
@@ -117,12 +119,12 @@ router.post('/create', authenticateToken, async (req, res) => {
       await connection.execute(
         `INSERT INTO material_new (
           id, requester_name, request_date, status, vendor, family_core,
-          family_pp, is_hf, material_type, erp, erp_vendor, is_caf,
+          family_pp, is_hf, material_type, erp, erp_pp, erp_vendor, is_caf,
           tg, bord_type, plastic, file_name, data,
           is_deleted
         ) VALUES (
           :id, :requester_name, :request_date, :status, :vendor, :family_core,
-          :family_pp, :is_hf, :material_type, :erp, :erp_vendor, :is_caf,
+          :family_pp, :is_hf, :material_type, :erp, :erp_pp, :erp_vendor, :is_caf,
           :tg, :bord_type, :plastic, :file_name, :data,
           :is_deleted
         )`,
@@ -141,6 +143,7 @@ router.post('/create', authenticateToken, async (req, res) => {
             is_hf: data.IS_HF,
             material_type: data.MATERIAL_TYPE,
             erp: data.ERP,
+            erp_pp: data.ERP_PP,
             erp_vendor: data.ERP_VENDOR,
             tg: data.TG,
             is_caf: data.IS_CAF,
@@ -165,7 +168,7 @@ router.post('/create', authenticateToken, async (req, res) => {
       if (!verifyResult.rows || verifyResult.rows.length === 0) {
         throw new Error('Record not found after insert');
       }
-      
+
       console.log('Insert successful, verified record:', verifyResult.rows[0]);
 
       res.status(201).json({
@@ -173,12 +176,12 @@ router.post('/create', authenticateToken, async (req, res) => {
         message: 'Thêm mới thành công',
         data: verifyResult.rows[0]
       });
-      
+
     } catch (insertError) {
       console.error('Error during insert:', insertError);
       throw new Error(`Failed to insert record: ${insertError.message}`);
     }
-    
+
   } catch (error) {
     console.error('Error creating material:', error);
     res.status(500).json({
@@ -239,7 +242,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     const updateFields = [];
     const bindParams = { id };
-    
+
     // Updated column mapping to match your database schema
     const columnMapping = {
       id: 'ID',
@@ -252,6 +255,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       is_hf: 'is_hf',
       material_type: 'material_type',
       erp: 'erp',
+      erp_pp: 'erp_pp',
       erp_vendor: 'erp_vendor',
       is_caf: 'is_caf',
       tg: 'tg',
@@ -278,7 +282,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       if (normalizedUpdateData[key] !== undefined && columnMapping[key]) {
         const columnName = columnMapping[key];
         updateFields.push(`${columnName} = :${key}`);
-        
+
         if (key === 'request_date' || key === 'complete_date') {
           bindParams[key] = normalizedUpdateData[key] ? new Date(normalizedUpdateData[key]) : null;
         } else if (integerFields.includes(key)) {
@@ -296,7 +300,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     console.log('Bind params:', bindParams);
 
     if (updateFields.length === 0) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: 'Không có dữ liệu cập nhật',
         debug: {
           receivedFields: Object.keys(updateData),
@@ -332,7 +336,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     await addHistoryNewRecord(connection, {
       materialNewId: id,
       actionType: 'UPDATE',
-      data: updateData, 
+      data: updateData,
       createdBy: req.user.username
     });
 
@@ -377,7 +381,7 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
       { autoCommit: true }
     );
 
-     if (result.rowsAffected > 0) {
+    if (result.rowsAffected > 0) {
       // Lưu lịch sử
       await addHistoryNewRecord(connection, {
         materialNewId: id,
@@ -392,7 +396,7 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
 
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
-    
+
     res.json({
       message: 'Xóa mềm thành công',
       id: id
@@ -455,17 +459,17 @@ router.post('/export-xlsm', async (req, res) => {
     const ws = workbook.Sheets[sheetName];
 
     const map = [
-      'VENDOR','FAMILY','GLASS_STYLE','RESIN_PERCENTAGE', null, null,
-      'PREFERENCE_CLASS','USE_TYPE', 'PP_TYPE',
-      'TG_MIN','TG_MAX','CENTER_GLASS',null, null,'DK_01G','DF_01G','DK_0_001GHZ','DF_0_001GHZ','DK_0_01GHZ','DF_0_01GHZ',
-      'DK_0_02GHZ','DF_0_02GHZ','DK_2GHZ','DF_2GHZ','DK_2_45GHZ','DF_2_45GHZ',
-      'DK_3GHZ','DF_3GHZ','DK_4GHZ', 'DF_4GHZ','DK_5GHZ','DF_5GHZ',
-      'DK_6GHZ', 'DF_6GHZ','DK_7GHZ', 'DF_7GHZ',
-      'DK_8GHZ','DF_8GHZ','DK_9GHZ', 'DF_9GHZ','DK_10GHZ','DF_10GHZ','DK_15GHZ','DF_15GHZ',
-      'DK_16GHZ','DF_16GHZ','DK_20GHZ','DF_20GHZ','DK_25GHZ','DF_25GHZ',
-      'DK_30GHZ','DF_30GHZ','DK_35GHZ__','DF_35GHZ__','DK_40GHZ','DF_40GHZ',
-      'DK_45GHZ','DF_45GHZ','DK_50GHZ','DF_50GHZ','DK_55GHZ','DF_55GHZ',
-      'IS_HF','DATA_SOURCE'
+      'VENDOR', 'FAMILY', 'GLASS_STYLE', 'RESIN_PERCENTAGE', null, null,
+      'PREFERENCE_CLASS', 'USE_TYPE', 'PP_TYPE',
+      'TG_MIN', 'TG_MAX', 'CENTER_GLASS', null, null, 'DK_01G', 'DF_01G', 'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ',
+      'DK_0_02GHZ', 'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ',
+      'DK_3GHZ', 'DF_3GHZ', 'DK_4GHZ', 'DF_4GHZ', 'DK_5GHZ', 'DF_5GHZ',
+      'DK_6GHZ', 'DF_6GHZ', 'DK_7GHZ', 'DF_7GHZ',
+      'DK_8GHZ', 'DF_8GHZ', 'DK_9GHZ', 'DF_9GHZ', 'DK_10GHZ', 'DF_10GHZ', 'DK_15GHZ', 'DF_15GHZ',
+      'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ', 'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ',
+      'DK_30GHZ', 'DF_30GHZ', 'DK_35GHZ__', 'DF_35GHZ__', 'DK_40GHZ', 'DF_40GHZ',
+      'DK_45GHZ', 'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ',
+      'IS_HF', 'DATA_SOURCE'
     ];
 
     data.forEach((row, idx) => {
@@ -511,5 +515,144 @@ router.post('/export-xlsm', async (req, res) => {
   }
 });
 
+router.post('/import-material-new', async (req, res) => {
+  let connection;
+
+  try {
+    const { data } = req.body;
+    if (!data || !Array.isArray(data) || data.length === 0) {
+      return res.status(400).json({ message: 'Invalid data format' });
+    }
+
+    // Debug: Log first row to see structure
+    console.log('First row structure:', JSON.stringify(data[0], null, 2));
+
+    connection = await database.getConnection();
+    const createdRecords = [];
+
+    const safeValue = (value, type = 'string') => {
+      if (value === null || value === undefined || value === '') return null;
+
+      switch (type) {
+        case 'number':
+          const num = parseFloat(value);
+          return isNaN(num) ? null : num;
+        case 'date':
+          if (value instanceof Date) return value;
+          const date = new Date(value);
+          return isNaN(date.getTime()) ? null : date;
+        default:
+          return String(value).trim();
+      }
+    };
+
+    const mapExcelKeysToDbKeys = (excelRow) => {
+      // Debug: Log all available keys and TG-related values
+      console.log('Available Excel keys:', Object.keys(excelRow));
+      console.log('TG raw value from Tg(TMA):', excelRow['Tg(TMA)']);
+      console.log('TG raw value from TG:', excelRow['TG']);
+      console.log('TG raw value from Tg:', excelRow['Tg']);
+      
+      // Try multiple possible column names for TG
+      let tgValue = excelRow['Tg(TMA)'] || 
+                    excelRow['TG(TMA)'] || 
+                    excelRow['Tg (TMA)'] ||  // with space
+                    excelRow['TG (TMA)'] ||  // with space
+                    excelRow['Tg'] || 
+                    excelRow['TG'] || 
+                    excelRow['tg'];
+      
+      console.log('Final TG value selected:', tgValue);
+      
+      return {
+        requester_name: safeValue(excelRow.REQUESTER_NAME),
+        request_date: safeValue(excelRow.REQUEST_DATE, 'date'),
+        status: safeValue(excelRow.STATUS) || 'Pending',
+        vendor: safeValue(excelRow.Vendor),
+        family_core: safeValue(excelRow['FAMILY_Core']),
+        family_pp: safeValue(excelRow['FAMiLY_PP']),
+        is_hf: safeValue(excelRow['IS_HF'], 'number'),
+        material_type: safeValue(excelRow['Material_Type']),
+        erp: safeValue(excelRow.ERP),
+        erp_pp: safeValue(excelRow['ERP_PP']),
+        erp_vendor: safeValue(excelRow['ERP_Vendor']),
+        is_caf: safeValue(excelRow['IS_CAF'], 'number'),
+        tg: safeValue(tgValue),
+        bord_type: safeValue(excelRow['BoardType']),
+        plastic: safeValue(excelRow['Mật độ nhựa']),
+        file_name: safeValue(excelRow['DK-DF_FileName']),
+        data: safeValue(excelRow['DATA_SOURCE_']),
+      };
+    };
+
+    for (let i = 0; i < data.length; i++) {
+      const item = mapExcelKeysToDbKeys(data[i]);
+
+      // Check if record already exists
+      const existingRecord = await connection.execute(
+        `SELECT COUNT(*) as count FROM material_new 
+         WHERE requester_name = :requester_name 
+         AND request_date = :request_date 
+         AND vendor = :vendor
+         AND family_core = :family_core
+         AND (is_deleted IS NULL OR is_deleted = 0)`,
+        {
+          requester_name: item.requester_name,
+          request_date: item.request_date,
+          vendor: item.vendor,
+          family_core: item.family_core
+        }
+      );
+
+      if (existingRecord.rows[0][0] > 0) {
+        console.log(`Record already exists, skipping: ${JSON.stringify(item)}`);
+        continue;
+      }
+
+      const bindParams = { ...item };
+
+      await connection.execute(
+        `INSERT INTO material_new (
+          id, requester_name, request_date, status,
+          vendor, family_core, family_pp, is_hf, material_type, 
+          erp, erp_pp, erp_vendor, is_caf, tg, bord_type, 
+          plastic, data, file_name, is_deleted
+        ) VALUES (
+          material_new_seq.NEXTVAL, :requester_name, :request_date, :status,
+          :vendor, :family_core, :family_pp, :is_hf, :material_type, 
+          :erp, :erp_pp, :erp_vendor, :is_caf, :tg, :bord_type, 
+          :plastic, :data, :file_name, 0
+        )`,
+        bindParams,
+        { autoCommit: false }
+      );
+      createdRecords.push(bindParams);
+    }
+
+    // Commit all changes at once
+    await connection.commit();
+    res.status(201).json({
+      success: true,
+      message: 'Import thành công',
+      data: createdRecords
+    });
+
+  } catch (error) {
+    console.error('Error importing material_new:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Import thất bại',
+      error: error.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
 
 module.exports = router;
