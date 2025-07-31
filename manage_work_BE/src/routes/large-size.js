@@ -461,7 +461,54 @@ router.put('/update/:id', async (req, res) => {
       // Trường hợp xác nhận
       const subject = `Đã xác nhận yêu cầu sử dụng bo to của mã hàng: ${row.CUSTOMER_CODE || ''}`;
       const html = `
-        <table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">\n          <tr>\n            <th align=\"left\">Mã sản phẩm</th>\n            <td>${row.CUSTOMER_CODE || ''}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Loại bo</th>\n            <td>${row.TYPE_BOARD || ''}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Kích thước Tối ưu</th>\n            <td>${row.SIZE_NORMAL || ''}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Tỷ lệ % (Bo thường)</th>\n            <td>${row.RATE_NORMAL || ''}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Kích thước bo to</th>\n            <td>${row.SIZE_BIG || ''}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Tỷ lệ % (Bo to)</th>\n            <td>${row.RATE_BIG || ''}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Người xác nhận</th>\n            <td>${confirm_by}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Xác nhận ngày</th>\n            <td>${new Date().toLocaleString()}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Yêu cầu sử dụng bo to</th>\n            <td>${isUseLarge ? 'Có' : 'Không'}</td>\n          </tr>\n          <tr>\n            <th align=\"left\">Ghi chú</th>\n            <td>${row.NOTE || ''}</td>\n          </tr>  \n        </table>\n        <br>\n        <a href=\"${feUrl}\">Link Xem chi tiết mã hàng đã xác nhận</a>\n        <br>\n        <br>\n        <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>\n        <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>\n      `;
+        <table border=\"1\" cellpadding=\"6\" cellspacing=\"0\" style=\"border-collapse:collapse;\">
+         <tr>
+           <th align=\"left\">Mã sản phẩm</th>
+            <td>${row.CUSTOMER_CODE || ''}</td>
+         </tr>
+          <tr>
+            <th align=\"left\">Loại bo</th>
+            <td>${row.TYPE_BOARD || ''}</td>
+          </tr>          
+          <tr>            
+          <th align=\"left\">Kích thước Tối ưu</th>
+            <td>${row.SIZE_NORMAL || ''}</td>
+          </tr>         
+          <tr>            
+          <th align=\"left\">Tỷ lệ % (Bo thường)</th>
+           <td>${row.RATE_NORMAL || ''}</td>
+          </tr>
+          <tr>            
+          <th align=\"left\">Kích thước bo to</th>
+          <td>${row.SIZE_BIG || ''}</td>
+          </tr>        
+          <tr>
+            <th align=\"left\">Tỷ lệ % (Bo to)</th>
+            <td>${row.RATE_BIG || ''}</td>
+          </tr>
+          <tr>
+            <th align=\"left\">Người xác nhận</th>
+            <td>${confirm_by}</td>
+           </tr>
+          <tr>
+            <th align=\"left\">Xác nhận ngày</th>
+            <td>${new Date().toLocaleString()}</td>
+         </tr>
+           <tr>
+           <th align=\"left\">Yêu cầu sử dụng bo to</th>
+              <td>${isUseLarge ? 'Có' : 'Không'}</td>
+            </tr>
+          <tr>
+           <th align=\"left\">Ghi chú</th>        
+           <td>${row.NOTE || ''}</td>
+         </tr> 
+           </table>
+          <br>
+           <a href=\"${feUrl}\">Link Xem chi tiết mã hàng đã xác nhận</a>
+           <br>
+           <br>
+         <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>\n
+         <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>      `;
 
       let recipients = [];
 

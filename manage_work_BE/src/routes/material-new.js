@@ -287,7 +287,6 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
           bindParams[key] = normalizedUpdateData[key] ? new Date(normalizedUpdateData[key]) : null;
         } else if (integerFields.includes(key)) {
           bindParams[key] = safeNumber(normalizedUpdateData[key]);
-          console.log(`Converting ${key} from`, normalizedUpdateData[key], 'to', bindParams[key]);
         } else {
           bindParams[key] = normalizedUpdateData[key] || null;
         }

@@ -435,10 +435,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
           bindParams[key] = updateData[key] ? new Date(updateData[key]) : null;
         } else if (numericPrecisionFields.includes(key)) {
           bindParams[key] = safeNumber(updateData[key], 4);
-          console.log(`Converting ${key} from`, updateData[key], 'to', bindParams[key]);
         } else if (integerFields.includes(key)) {
           bindParams[key] = safeNumber(updateData[key]);
-          console.log(`Converting ${key} from`, updateData[key], 'to', bindParams[key]);
         } else {
           bindParams[key] = updateData[key] || null;
         }

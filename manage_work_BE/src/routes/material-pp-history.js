@@ -56,7 +56,6 @@ async function addHistoryPpRecord(connection, { materialPpId, actionType, create
         `SELECT material_pp_history_seq.NEXTVAL FROM DUAL`
       );
       historyId = seqResult.rows[0][0];
-      console.log('Using sequence for history ID:', historyId);
     } catch (seqError) {
       console.log('Sequence not found, using MAX+1 approach');
       // If sequence doesn't exist, use MAX+1

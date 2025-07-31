@@ -9,8 +9,29 @@ const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
 
+const { 
+    generateCreateMaterialEmailHTML, 
+    generateStatusUpdateEmailHTML, 
+    sendMailMaterialCore
+} = require('../helper/sendMailMaterialCore');
+
 const { authenticateToken } = require('../middleware/auth');
 const { addHistoryRecord } = require('./material-core-history');
+
+async function getOldStatusBeforeUpdate(connection, materialId) {
+  try {
+    const result = await connection.execute(
+      `SELECT status FROM material_core WHERE id = :id`,
+      { id: materialId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+    
+    return result.rows.length > 0 ? result.rows[0].STATUS : null;
+  } catch (error) {
+    console.error('Error getting old status:', error);
+    return null;
+  }
+}
 
 // Lấy danh sách material core
 router.get('/list', authenticateToken, async (req, res) => {
@@ -148,8 +169,6 @@ router.get('/list', authenticateToken, async (req, res) => {
     const totalRecords = countResult.rows[0].TOTAL;
     const totalPages = Math.ceil(totalRecords / pageSize);
     
-    console.log(`Page: ${page}, PageSize: ${pageSize}, Total: ${totalRecords}, Returned: ${dataResult.rows.length}`);
-    
     res.json({
       data: dataResult.rows,
       pagination: {
@@ -286,26 +305,28 @@ router.post('/create', authenticateToken, async (req, res) => {
   let connection;
   try {
     const data = req.body;
-    console.log('MaterialCore create req.body:', JSON.stringify(data));
     // Đảm bảo cả hai trường là mảng và loại bỏ phần tử rỗng/null/undefined
     let topArr = Array.isArray(data.top_foil_cu_weight) ? data.top_foil_cu_weight : [data.top_foil_cu_weight];
     let botArr = Array.isArray(data.bot_foil_cu_weight) ? data.bot_foil_cu_weight : [data.bot_foil_cu_weight];
     topArr = topArr.filter(x => x !== undefined && x !== null && x !== '');
     botArr = botArr.filter(x => x !== undefined && x !== null && x !== '');
+    
     if (topArr.length !== botArr.length) {
       return res.status(400).json({
         success: false,
         message: 'Số lượng giá trị Top/Bot Foil Cu Weight phải bằng nhau.'
       });
     }
+    connection = await database.getConnection();
+    
     const createdRecords = [];
     for (let i = 0; i < topArr.length; i++) {
-      connection = await database.getConnection();
       // Get next ID from sequence
       const result = await connection.execute(
         `SELECT material_core_seq.NEXTVAL FROM DUAL`
       );
       const nextId = result.rows[0][0];
+      
       const bindParams = {
         id: nextId,
         requester_name: data.requester_name,
@@ -379,6 +400,7 @@ router.post('/create', authenticateToken, async (req, res) => {
         filename: data.filename,
         is_deleted: 0,
       };
+      
       await connection.execute(
         `INSERT INTO material_core (
           id, requester_name, request_date, handler, 
@@ -444,8 +466,9 @@ router.post('/create', authenticateToken, async (req, res) => {
           :is_hf, :data_source, :filename, :is_deleted
         )`,
         bindParams,
-        { autoCommit: true }
+        { autoCommit: true } // ✅ Đổi thành false để có thể commit sau
       );
+      
       // Lưu lịch sử
       try {
         await addHistoryRecord(connection, {
@@ -528,15 +551,39 @@ router.post('/create', authenticateToken, async (req, res) => {
         id: nextId,
         ...bindParams
       });
-      await connection.close();
     }
+    await connection.commit();
+    
     res.status(201).json({
       success: true,
       message: 'Material core(s) created successfully',
       data: createdRecords
     });
+
+    // ✅ Gửi email bất đồng bộ ở background (không chờ kết quả)
+    // Sử dụng setImmediate hoặc process.nextTick để chạy sau khi response đã gửi
+    setImmediate(async () => {
+      try {
+        const emailSubject = `[Material System] Tạo mới Material Core - ${data.vendor || 'N/A'} | ${data.family || 'N/A'}`;
+        const emailHTML = generateCreateMaterialEmailHTML(data, createdRecords);
+        
+        await sendMailMaterialCore(emailSubject, emailHTML);
+        console.log('Email notification sent successfully for new material creation');
+      } catch (emailError) {
+        console.error('Warning: Failed to send email notification:', emailError);
+        // Email fail không ảnh hưởng gì vì đã trả response thành công
+      }
+    });
+    
   } catch (error) {
     console.error('Error creating material core:', error);
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Error rolling back transaction:', rollbackError);
+      }
+    }
     res.status(500).json({
       success: false,
       message: 'Failed to create material core',
@@ -552,7 +599,6 @@ router.post('/create', authenticateToken, async (req, res) => {
     }
   }
 });
-
 router.put('/update/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
@@ -566,10 +612,12 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     }
 
     connection = await database.getConnection();
+    const oldStatus = await getOldStatusBeforeUpdate(connection, id);
 
     if (updateData.status && !['Approve', 'Cancel', 'Pending'].includes(updateData.status)) {
       return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
     }
+    
     if (updateData.top_foil_cu_weight) {
       if (Array.isArray(updateData.top_foil_cu_weight)) {
         updateData.top_foil_cu_weight = updateData.top_foil_cu_weight[0];
@@ -583,6 +631,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     if (updateData.is_hf && !['TRUE', 'FALSE'].includes(updateData.is_hf)) {
       return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
     }
+    
     const updateFields = [];
     const bindParams = { id };
     const columnMapping = {
@@ -657,6 +706,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       data_source: 'data_source',
       filename: 'filename'
     };
+
     const safeNumber = (value, precision = null) => {
       if (value === '' || value === null || value === undefined) {
         return null;
@@ -703,10 +753,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
           bindParams[key] = updateData[key] ? new Date(updateData[key]) : null;
         } else if (numericPrecisionFields.includes(key)) {
           bindParams[key] = safeNumber(updateData[key], 4);
-          console.log(`Converting ${key} from`, updateData[key], 'to', bindParams[key]);
         } else if (integerFields.includes(key)) {
           bindParams[key] = safeNumber(updateData[key]);
-          console.log(`Converting ${key} from`, updateData[key], 'to', bindParams[key]);
         } else {
           bindParams[key] = updateData[key] || null;
         }
@@ -715,34 +763,74 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có dữ liệu cập nhật' });
-    } const updateQuery = `
+    }
+
+    const updateQuery = `
       UPDATE material_core 
       SET ${updateFields.join(', ')}
       WHERE id = :id
     `;
+    
     const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
 
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
+    
     const updatedRecord = await connection.execute(
       `SELECT * FROM material_core WHERE id = :id`,
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
+    // KIỂM TRA VÀ GỬI EMAIL KHI TRẠNG THÁI THAY ĐỔI
+    if (updateData.status && oldStatus && updateData.status !== oldStatus) {
+      try {
+        // Lấy thông tin material để gửi email
+        const materialInfo = updatedRecord.rows[0];
+        const newStatus = updateData.status;
+        
+        // Chỉ gửi email khi chuyển từ Pending sang Approve
+        if (oldStatus === 'Pending' && newStatus === 'Approve') {
+          const emailSubject = `[Material System] Material Core được phê duyệt - ID: ${id}`;
+          const emailHTML = generateStatusUpdateEmailHTML(
+            id, 
+            oldStatus, 
+            newStatus, 
+            req.user.username,
+            {
+              vendor: materialInfo.VENDOR,
+              family: materialInfo.FAMILY,
+              requester_name: materialInfo.REQUESTER_NAME
+            }
+          );
+          
+          await sendMailMaterialCore(emailSubject, emailHTML);
+          console.log(`Email notification sent for status change: ${oldStatus} -> ${newStatus}`);
+        }
+      } catch (emailError) {
+        console.error('Warning: Failed to send status update email:', emailError);
+        // Không throw error để không ảnh hưởng đến quá trình cập nhật
+      }
+    }
+
     // Lưu lịch sử
-    await addHistoryRecord(connection, {
-      materialCoreId: id,
-      actionType: 'UPDATE',
-      data: updateData, // Đổi từ changeDetails sang data
-      createdBy: req.user.username
-    });
+    try {
+      await addHistoryRecord(connection, {
+        materialCoreId: id,
+        actionType: 'UPDATE',
+        data: updateData,
+        createdBy: req.user.username
+      });
+    } catch (historyError) {
+      console.error('Warning: Failed to record history:', historyError);
+    }
 
     res.json({
       message: 'Cập nhật thành công',
       data: updatedRecord.rows[0]
     });
+    
   } catch (err) {
     console.error('Error updating material core:', err);
     res.status(500).json({
@@ -812,82 +900,6 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
     }
   }
 });
-
-async function createBackupTemplate() {
-  console.log('Creating backup template...');
-
-  const workbook = new ExcelJS.Workbook();
-
-  // Tạo đủ 5 sheets để đảm bảo sheet[4] tồn tại
-  for (let i = 0; i < 5; i++) {
-    const worksheet = workbook.addWorksheet(`Sheet${i + 1}`);
-
-    if (i === 4) { // Sheet thứ 5 (index 4)
-      // Tạo title row
-      worksheet.getCell('A1').value = 'Material Core Export Template';
-      worksheet.getCell('A1').font = { bold: true, size: 14 };
-
-      // Tạo header row tại row 2
-      const headers = [
-        'STT', 'ID', 'Name', 'Description', 'Type', // A-E
-        'VENDOR', 'FAMILY', 'PREPREG_COUNT', 'NOMINAL_THICKNESS', 'SPEC_THICKNESS',
-        'PREFERENCE_CLASS', 'USE_TYPE', 'RIGID', 'TOP_FOIL_CU_WEIGHT', 'BOT_FOIL_CU_WEIGHT',
-        'TG_MIN', 'TG_MAX', 'CENTER_GLASS', 'DK_01G', 'DF_01G',
-        'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ', 'DK_0_02GHZ',
-        'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ',
-        'DK_3GHZ', 'DF_3GHZ', 'DK_4GHZ', 'DF_4GHZ', 'DK_5GHZ', 'DF_5GHZ',
-        'DK_6GHZ', 'DF_6GHZ', 'DK_7GHZ', 'DF_7GHZ', 'DK_8GHZ', 'DF_8GHZ',
-        'DK_9GHZ', 'DF_9GHZ', 'DK_10GHZ', 'DF_10GHZ',
-        'DK_15GHZ', 'DF_15GHZ', 'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ',
-        'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ', 'DK_30GHZ', 'DF_30GHZ',
-        'DK_35GHZ', 'DF_35GHZ', 'DK_40GHZ', 'DF_40GHZ', 'DK_45GHZ',
-        'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ'
-      ];
-
-      // Ghi headers vào row 2
-      headers.forEach((header, index) => {
-        const cell = worksheet.getCell(2, index + 1);
-        cell.value = header;
-        cell.font = { bold: true };
-        cell.fill = {
-          type: 'pattern',
-          pattern: 'solid',
-          fgColor: { argb: 'FFE6E6FA' } // Light purple
-        };
-        cell.border = {
-          top: { style: 'thin' },
-          left: { style: 'thin' },
-          bottom: { style: 'thin' },
-          right: { style: 'thin' }
-        };
-      });
-
-      // Thiết lập độ rộng cột
-      worksheet.getColumn('A').width = 5;  // STT
-      worksheet.getColumn('B').width = 10; // ID
-      worksheet.getColumn('C').width = 20; // Name
-      worksheet.getColumn('D').width = 30; // Description
-      worksheet.getColumn('E').width = 15; // Type
-
-      // Các cột data chính (F-BH)
-      for (let col = 6; col <= headers.length; col++) {
-        worksheet.getColumn(col).width = 12;
-      }
-
-      // Freeze panes
-      worksheet.views = [{ state: 'frozen', xSplit: 0, ySplit: 2 }];
-
-      // Thêm một vài dòng mẫu để test
-      worksheet.getCell('A3').value = 1;
-      worksheet.getCell('B3').value = 'SAMPLE001';
-      worksheet.getCell('C3').value = 'Sample Material';
-      worksheet.getCell('D3').value = 'This is a sample row';
-      worksheet.getCell('E3').value = 'Test';
-    }
-  }
-
-  return workbook;
-}
 
 function numberToColumnName(num) {
   let result = '';
