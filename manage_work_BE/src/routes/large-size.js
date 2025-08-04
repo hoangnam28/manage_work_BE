@@ -219,7 +219,7 @@ router.post('/create', async (req, res) => {
     await connection.commit();
 
     // Gửi mail thông báo yêu cầu xác nhận
-    const feUrl = `http://192.84.105.173:4000/decide-board/${nextId}`;
+    const feUrl = `http://192.84.105.173:8888/decide-board/${nextId}`;
     const subject = `Yêu cầu xác nhận sử dụng bo to của mã hàng: ${customer_part_number}`;
     const html = `
     <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
@@ -453,7 +453,7 @@ router.put('/update/:id', async (req, res) => {
       creatorEmail = null;
     }
 
-    const feUrl = `http://192.84.105.173:4000/decide-board/${id}`;
+    const feUrl = `http://192.84.105.173:8888/decide-board/${id}`;
     const isUseLarge = (row.REQUEST || request) === 'TRUE';
 
     // Xử lý gửi mail dựa trên trường hợp

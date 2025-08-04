@@ -6,8 +6,13 @@ require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
+const { 
+    generateCreateMaterialEmailHTML, 
+    generateStatusUpdateEmailHTML, 
+    sendMailMaterialPP
+} = require('../helper/sendMailMaterialPP');
 
-const { authenticateToken, checkEditPermission } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
 const { addHistoryPpRecord } = require('./material-pp-history');
 
 // Lấy danh sách material core
@@ -298,6 +303,19 @@ router.post('/create', authenticateToken, async (req, res) => {
       message: 'Material pp(s) created successfully',
       data: createdRecords
     });
+        // Sử dụng setImmediate hoặc process.nextTick để chạy sau khi response đã gửi
+    setImmediate(async () => {
+      try {
+        const emailSubject = `[Material System] Tạo mới Material PP - ${data.vendor || 'N/A'} | ${data.family || 'N/A'}`;
+        const emailHTML = generateCreateMaterialEmailHTML(data, createdRecords);
+        
+        await sendMailMaterialPP(emailSubject, emailHTML);
+        console.log('Email notification sent successfully for new material creation');
+      } catch (emailError) {
+        console.error('Warning: Failed to send email notification:', emailError);
+        // Email fail không ảnh hưởng gì vì đã trả response thành công
+      }
+    });
   } catch (error) {
     console.error('Error creating material pp:', error);
     res.status(500).json({
@@ -338,6 +356,23 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     if (updateData.is_hf && !['TRUE', 'FALSE'].includes(updateData.is_hf)) {
       return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
     }
+
+    // ✅ THÊM: Lấy thông tin cũ trước khi cập nhật
+    let oldStatus = null;
+    let oldRecord = null;
+    if (updateData.status) {
+      const oldResult = await connection.execute(
+        `SELECT status, vendor, family, name FROM material_properties WHERE id = :id`,
+        { id },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+      
+      if (oldResult.rows.length > 0) {
+        oldRecord = oldResult.rows[0];
+        oldStatus = oldRecord.STATUS;
+      }
+    }
+
     const updateFields = [];
     const bindParams = { id };
     const columnMapping = {
@@ -396,6 +431,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       data_source: 'data_source',
       filename: 'filename'
     };
+
     const safeNumber = (value, precision = null) => {
       if (value === '' || value === null || value === undefined) {
         return null;
@@ -445,7 +481,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có dữ liệu cập nhật' });
-    } const updateQuery = `
+    }
+    const updateQuery = `
       UPDATE material_properties 
       SET ${updateFields.join(', ')}
       WHERE id = :id
@@ -460,6 +497,40 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
+
+    // ✅ SỬA: Kiểm tra và gửi email khi trạng thái thay đổi
+    if (updateData.status && oldStatus && updateData.status !== oldStatus) {
+      // ✅ Sử dụng setImmediate để gửi email sau khi response đã được gửi
+      setImmediate(async () => {
+        try {
+          const materialInfo = updatedRecord.rows[0];
+          const newStatus = updateData.status;
+          
+          // Chỉ gửi email khi chuyển từ Pending sang Approve hoặc Cancel
+          if (oldStatus === 'Pending' && (newStatus === 'Approve' || newStatus === 'Cancel')) {
+            const emailSubject = `[Material System] Material PP được cập nhật - ID: ${id}`;
+            const emailHTML = generateStatusUpdateEmailHTML(
+              id, 
+              oldStatus, 
+              newStatus, 
+              req.user.username,
+              {
+                vendor: materialInfo.VENDOR,
+                family: materialInfo.FAMILY,
+                name: materialInfo.NAME
+              }
+            );
+            
+            await sendMailMaterialPP(emailSubject, emailHTML);
+            console.log(`✅ Email notification sent for status change: ${oldStatus} -> ${newStatus}`);
+          }
+        } catch (emailError) {
+          console.error('❌ Warning: Failed to send status update email:', emailError);
+        }
+      });
+    }
+
+    // Ghi lại lịch sử
     await addHistoryPpRecord(connection, {
       materialPpId: id,
       actionType: 'UPDATE',
@@ -487,7 +558,6 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     }
   }
 });
-
 router.delete('/delete/:id', authenticateToken, async (req, res) => {
   let { id } = req.params;
   let connection;

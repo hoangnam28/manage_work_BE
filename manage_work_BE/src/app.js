@@ -18,7 +18,7 @@ const path = require('path');
 const fs = require('fs');
 const app = express();
 
-const allowedOrigins = ['http://localhost:4000', 'http://192.84.105.173:4000'];
+const allowedOrigins = ['http://localhost:8888', 'http://192.84.105.173:8888'];
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {

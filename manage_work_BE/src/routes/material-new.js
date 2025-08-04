@@ -10,6 +10,12 @@ const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xl
 const { addHistoryNewRecord } = require('./material-new-history');
 const { authenticateToken } = require('../middleware/auth');
 
+const {
+  generateCreateMaterialEmailHTML,
+  generateStatusUpdateEmailHTML,
+  sendMailMaterialNew
+} = require('../helper/sendMailMaterialNew');
+
 // Lấy danh sách material core
 router.get('/list', authenticateToken, async (req, res) => {
   let connection;
@@ -176,7 +182,18 @@ router.post('/create', authenticateToken, async (req, res) => {
         message: 'Thêm mới thành công',
         data: verifyResult.rows[0]
       });
+      setImmediate(async () => {
+        try {
+          const emailSubject = `[Material System] Tạo mới Material New - ${data.vendor || 'N/A'} | ${data.family_core || 'N/A'} | ${data.family_pp || 'N/A'}`;
+          const emailHTML = generateCreateMaterialEmailHTML(data, createdRecords);
 
+          await sendMailMaterialNew(emailSubject, emailHTML);
+          console.log('Email notification sent successfully for new material creation');
+        } catch (emailError) {
+          console.error('Warning: Failed to send email notification:', emailError);
+          // Email fail không ảnh hưởng gì vì đã trả response thành công
+        }
+      });
     } catch (insertError) {
       console.error('Error during insert:', insertError);
       throw new Error(`Failed to insert record: ${insertError.message}`);
@@ -240,6 +257,20 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Giá trị is_caf không hợp lệ' });
     }
 
+    let oldStatus = null;
+    let oldRecord = null;
+    if (updateData.status) {
+      const oldResult = await connection.execute(
+        `SELECT status, vendor, family, name FROM material_properties WHERE id = :id`,
+        { id },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      );
+
+      if (oldResult.rows.length > 0) {
+        oldRecord = oldResult.rows[0];
+        oldStatus = oldRecord.STATUS;
+      }
+    }
     const updateFields = [];
     const bindParams = { id };
 
@@ -331,6 +362,38 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
+    // ✅ SỬA: Kiểm tra và gửi email khi trạng thái thay đổi
+    if (updateData.status && oldStatus && updateData.status !== oldStatus) {
+      // ✅ Sử dụng setImmediate để gửi email sau khi response đã được gửi
+      setImmediate(async () => {
+        try {
+          const materialInfo = updatedRecord.rows[0];
+          const newStatus = updateData.status;
+
+          // Chỉ gửi email khi chuyển từ Pending sang Approve hoặc Cancel
+          if (oldStatus === 'Pending' && (newStatus === 'Approve' || newStatus === 'Cancel')) {
+            const emailSubject = `[Material System] Material New được cập nhật - ID: ${id}`;
+            const emailHTML = generateStatusUpdateEmailHTML(
+              id,
+              oldStatus,
+              newStatus,
+              req.user.username,
+              {
+                vendor: materialInfo.VENDOR,
+                family_core: materialInfo.FAMILY_CORE,
+                family_pp: materialInfo.FAMILY_PP,
+                name: materialInfo.NAME
+              }
+            );
+
+            await sendMailMaterialPP(emailSubject, emailHTML);
+            console.log(`✅ Email notification sent for status change: ${oldStatus} -> ${newStatus}`);
+          }
+        } catch (emailError) {
+          console.error('❌ Warning: Failed to send status update email:', emailError);
+        }
+      });
+    }
 
     await addHistoryNewRecord(connection, {
       materialNewId: id,
@@ -551,18 +614,18 @@ router.post('/import-material-new', async (req, res) => {
       console.log('TG raw value from Tg(TMA):', excelRow['Tg(TMA)']);
       console.log('TG raw value from TG:', excelRow['TG']);
       console.log('TG raw value from Tg:', excelRow['Tg']);
-      
+
       // Try multiple possible column names for TG
-      let tgValue = excelRow['Tg(TMA)'] || 
-                    excelRow['TG(TMA)'] || 
-                    excelRow['Tg (TMA)'] ||  // with space
-                    excelRow['TG (TMA)'] ||  // with space
-                    excelRow['Tg'] || 
-                    excelRow['TG'] || 
-                    excelRow['tg'];
-      
+      let tgValue = excelRow['Tg(TMA)'] ||
+        excelRow['TG(TMA)'] ||
+        excelRow['Tg (TMA)'] ||  // with space
+        excelRow['TG (TMA)'] ||  // with space
+        excelRow['Tg'] ||
+        excelRow['TG'] ||
+        excelRow['tg'];
+
       console.log('Final TG value selected:', tgValue);
-      
+
       return {
         requester_name: safeValue(excelRow.REQUESTER_NAME),
         request_date: safeValue(excelRow.REQUEST_DATE, 'date'),
