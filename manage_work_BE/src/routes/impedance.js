@@ -87,7 +87,7 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
        IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
        IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
        IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
-       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136,
+       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136, IMP_137,
        NOTE as note
        FROM impedances
        WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
@@ -190,7 +190,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
        IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
        IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
        IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
-       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136,
+       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136, IMP_137,
        NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
@@ -322,7 +322,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
        IMP_112, IMP_113, IMP_114, IMP_115, IMP_116, IMP_117, IMP_118,
        IMP_119, IMP_120, IMP_121, IMP_122, IMP_123, IMP_124, IMP_125,
        IMP_126, IMP_127, IMP_128, IMP_129, IMP_130, IMP_131, IMP_132,
-       IMP_133, IMP_134, IMP_135, IMP_136,
+       IMP_133, IMP_134, IMP_135, IMP_136, IMP_137,
        NOTE AS note
        FROM impedances
        WHERE IMP_ID = :imp_id`,

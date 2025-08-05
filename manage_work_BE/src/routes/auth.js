@@ -44,7 +44,7 @@ router.post('/login', async (req, res) => {
       role: user.ROLE
     };
     const accessToken = jwt.sign(userPayload, process.env.JWT_SECRET, { expiresIn: '24h' });
-    const refreshToken = jwt.sign(userPayload, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '7d' });
+    const refreshToken = jwt.sign(userPayload, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '30d' });
 
     res.json({
       message: 'Đăng nhập thành công',
@@ -150,17 +150,25 @@ router.get('/profile', authenticateToken, async (req, res) => {
 router.post('/refresh', (req, res) => {
   try {
     const { refreshToken } = req.body;
-    
     if (!refreshToken) {
       return res.status(401).json({ message: 'Refresh token không được cung cấp' });
     }
-    
     const tokens = refreshAccessToken(refreshToken);
     res.json(tokens);
   } catch (error) {
     console.error('Refresh token error:', error);
-    res.status(403).json({ message: 'Refresh token không hợp lệ' });
+
+    if (error.code === 'REFRESH_TOKEN_EXPIRED') {
+      return res.status(401).json({ 
+        message: 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại',
+        code: 'REFRESH_TOKEN_EXPIRED'
+      });
+    }
+    // Nếu refreshToken không hợp lệ cũng trả về 401
+    return res.status(401).json({ 
+      message: 'Refresh token không hợp lệ',
+      code: 'INVALID_REFRESH_TOKEN'
+    });
   }
 });
-
 module.exports = router;

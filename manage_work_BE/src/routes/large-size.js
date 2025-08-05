@@ -94,7 +94,7 @@ router.get('/list', async (req, res) => {
   try {
     connection = await database.getConnection();
     const result = await connection.execute(
-      `SELECT id, customer_code, type_board, size_normal, rate_normal, size_big, rate_big, request, confirm_by, note, is_deleted FROM large_size WHERE is_deleted = 0`,
+      `SELECT id, customer_code, type_board, size_normal, rate_normal, size_big, rate_big, request, confirm_by, note, is_deleted FROM large_size`,
       [],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -677,7 +677,7 @@ router.put('/update/:id', async (req, res) => {
   }
 });
 
-router.delete('/delete/:id', async (req, res) => {
+router.delete('/delete/:id', authenticateToken, async (req, res) => {
   let { id } = req.params;
   let connection;
   try {
@@ -689,35 +689,129 @@ router.delete('/delete/:id', async (req, res) => {
     id = Number(id);
     connection = await database.getConnection();
 
-    // Kiểm tra trạng thái xác nhận
-    const checkResult = await connection.execute(
-      `SELECT confirm_by FROM large_size WHERE id = :id`,
-      { id },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    if (!checkResult.rows.length) {
+    // Lấy thông tin bản ghi và email người thực hiện xóa
+    const recordInfo = await connection.execute(
+  `SELECT customer_code, type_board, size_normal, rate_normal, size_big, rate_big, request, confirm_by, note, created_by_email FROM large_size WHERE id = :id`,
+  { id },
+  { outFormat: oracledb.OUT_FORMAT_OBJECT }
+);
+
+    const record = recordInfo.rows[0];
+    if (!record) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
-    if (checkResult.rows[0].CONFIRM_BY) {
-      return res.status(400).json({ message: 'Mã hàng đã xác nhận, không thể xóa!' });
-    }
 
-    // Xóa mềm (cập nhật is_deleted = 1)
-    const result = await connection.execute(
+    // Thực hiện xóa mềm và lưu lịch sử
+    await connection.execute(
       `UPDATE large_size SET is_deleted = 1 WHERE id = :id`,
       { id },
-      { autoCommit: true }
+      { autoCommit: false }
     );
 
-    if (result.rowsAffected === 0) {
-      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
-    }
+    // Lưu lịch sử xóa
+    const historyId = await connection.execute(`SELECT large_size_history_seq.NEXTVAL FROM DUAL`);
+    await connection.execute(
+      `INSERT INTO large_size_history (
+        history_id, id, type_board, size_normal, rate_normal, size_big, rate_big,
+        request, confirm_by, note, customer_code, is_deleted, created_by_email,
+        action_by_email, action_at, action_type
+      ) VALUES (
+        :history_id, :id, :type_board, :size_normal, :rate_normal, :size_big, :rate_big,
+        :request, :confirm_by, :note, :customer_code, :is_deleted, :created_by_email,
+        :action_by_email, CURRENT_TIMESTAMP, 'DELETE'
+      )`,
+      {
+        history_id: historyId.rows[0][0],
+        id,
+        type_board: record.TYPE_BOARD || '',
+        size_normal: record.SIZE_NORMAL || '',
+        rate_normal: record.RATE_NORMAL || '',
+        size_big: record.SIZE_BIG || '',
+        rate_big: record.RATE_BIG || '',
+        request: record.REQUEST || '',
+        confirm_by: record.CONFIRM_BY || '',
+        note: record.NOTE || '',
+        customer_code: record.CUSTOMER_CODE,
+        is_deleted: 1,
+        created_by_email: record.CREATED_BY_EMAIL || '',
+        action_by_email: record.ACTION_BY_EMAIL || ''
+      },
+      { autoCommit: false }
+    );
+
+    await connection.commit();
+
+    // Gửi email thông báo
+    const emailContent = `
+      <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+        <tr>
+          <th align="left">Mã sản phẩm</th>
+          <td>${record.CUSTOMER_CODE}</td>
+        </tr>
+        <tr>
+          <th align="left">Loại bo</th>
+          <td>${record.TYPE_BOARD || ''}</td>
+        </tr>
+        <tr>
+          <th align="left">Kích thước Tối ưu</th>
+          <td>${record.SIZE_NORMAL || ''}</td>
+        </tr>
+        <tr>
+          <th align="left">Tỷ lệ % (Bo thường)</th>
+          <td>${record.RATE_NORMAL || ''}</td>
+        </tr>
+        <tr>
+          <th align="left">Kích thước bo to</th>
+          <td>${record.SIZE_BIG || ''}</td>
+        </tr>
+        <tr>
+          <th align="left">Tỷ lệ % (Bo to)</th>
+          <td>${record.RATE_BIG || ''}</td>
+        </tr>
+        <tr>
+          <th align="left">Người hủy</th>
+          <td>${record.ACTION_BY_EMAIL || 'N/A'}</td>
+        </tr>
+      </table>
+      <br>
+      <a href="http://192.84.105.173:8888/decide-board/${id}">Link xem chi tiết</a>
+      <br>
+      <br>
+      <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
+      <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
+    `;
+
+    const mailRecipients = [...new Set([
+      ...AllEmails,
+      record.CREATED_BY_EMAIL,
+      record.ACTION_BY_EMAIL,
+    ].filter(Boolean))];
+
+    sendMail(
+      `Đã hủy yêu cầu sử dụng bo to mã hàng: ${record.CUSTOMER_CODE}`,
+      emailContent,
+      mailRecipients
+    );
+
     res.json({
-      message: 'Xóa thành công',
-      id: id
+      success: true, // Thêm field success để frontend dễ check
+      message: 'Hủy yêu cầu thành công',
+      id: id,
+      data: {
+        id: id,
+        customer_code: record.CUSTOMER_CODE,
+        is_deleted: 1
+      }
     });
   } catch (err) {
-    console.error('Error deleting material core:', err);
+    console.error('Error deleting large size record:', err);
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackErr) {
+        console.error('Error rolling back transaction:', rollbackErr);
+      }
+    }
     res.status(500).json({
       message: 'Lỗi server',
       error: err.message
