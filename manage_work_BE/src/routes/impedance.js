@@ -57,16 +57,16 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
-    
+
     // Lấy tổng số bản ghi
     const countResult = await connection.execute(
       `SELECT COUNT(*) as total FROM impedances WHERE IS_DELETED = 0 OR IS_DELETED IS NULL`,
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     const total = countResult.rows[0].TOTAL;
-    
+
     // Lấy dữ liệu với phân trang
     const result = await connection.execute(
       `SELECT IMP_ID as imp_id,
@@ -93,15 +93,15 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
        WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
        ORDER BY IMP_ID DESC`,
       {},
-      { 
+      {
         outFormat: oracledb.OUT_FORMAT_OBJECT,
         maxRows: 1000 // Tăng giới hạn số hàng tối đa
       }
     );
-    
+
     // Đảm bảo result.rows là mảng
     const rows = Array.isArray(result.rows) ? result.rows : [];
-    
+
     res.json({
       data: rows,
       total: total
@@ -241,7 +241,6 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
     }
   }
 });
-
 router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, async (req, res) => {
   const { impId } = req.params;
   const updateData = req.body;
@@ -255,22 +254,89 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
         error: 'Yêu cầu cần có ID hợp lệ để cập nhật dữ liệu'
       });
     }
+
     connection = await database.getConnection();
-    const checkRecord = await connection.execute(
-      `SELECT COUNT(*) as COUNT FROM impedances WHERE IMP_ID = :id`,
+
+    // Get current record to check if exists and get mã hàng
+    const currentRecord = await connection.execute(
+      `SELECT IMP_ID, IMP_2 as ma_hang, IMP_137 as tong_hop_du_lieu FROM impedances WHERE IMP_ID = :id`,
       { id: impId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    if (!checkRecord.rows[0] || checkRecord.rows[0].COUNT === 0) {
+    if (!currentRecord.rows || currentRecord.rows.length === 0) {
       return res.status(404).json({
         message: 'Không tìm thấy bản ghi',
         error: `Không tìm thấy bản ghi với ID ${impId}`
       });
     }
+
+    const currentData = currentRecord.rows[0];
+    let affectedRecords = [];
+    let bulkUpdatePerformed = false;
+
+    // Special handling for IMP_137 (Tổng hợp dữ liệu đo thực tế)
+    if (updateData.imp_137 !== undefined && updateData.imp_137 !== null) {
+      const maHang = currentData.MA_HANG;
+
+      if (!maHang) {
+        return res.status(400).json({
+          message: 'Không thể cập nhật theo mã hàng',
+          error: 'Bản ghi này không có mã hàng để thực hiện cập nhật hàng loạt'
+        });
+      }
+
+      // Check if should update by mã hàng
+      if (updateData.updateByMaHang === true) {
+        // Find all records with the same mã hàng
+        const relatedRecords = await connection.execute(
+          `SELECT IMP_ID, IMP_2 as ma_hang, IMP_137 as tong_hop_du_lieu FROM impedances WHERE IMP_2 = :ma_hang`,
+          { ma_hang: maHang },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+
+        // Update all records with the same mã hàng
+        const updateResult = await connection.execute(
+          `UPDATE impedances SET IMP_137 = :new_value WHERE IMP_2 = :ma_hang`,
+          {
+            new_value: updateData.imp_137,
+            ma_hang: maHang
+          },
+          { autoCommit: false } // Don't commit yet
+        );
+
+        affectedRecords = relatedRecords.rows.map(row => ({
+          impId: row.IMP_ID,
+          maHang: row.MA_HANG,
+          oldValue: row.TONG_HOP_DU_LIEU,
+          newValue: updateData.imp_137
+        }));
+
+        bulkUpdatePerformed = true;
+        console.log(`Updated IMP_137 for ${updateResult.rowsAffected} records with mã hàng: ${maHang}`);
+      } else {
+        // Update only the current record's IMP_137
+        await connection.execute(
+          `UPDATE impedances SET IMP_137 = :new_value WHERE IMP_ID = :imp_id`,
+          {
+            new_value: updateData.imp_137,
+            imp_id: impId
+          },
+          { autoCommit: false }
+        );
+      }
+    }
+
+    // Handle other fields normally (only for the specific record)
     const updateFields = [];
     const bindParams = { imp_id: impId };
-    for (let i = 1; i <= 136; i++) {
+
+    for (let i = 1; i <= 137; i++) {
+      // Skip IMP_137 if it was already handled above
+      if (i === 137 && updateData.imp_137 !== undefined) {
+        continue;
+      }
+
       const reqField = `imp_${i}`;
       const dbField = `IMP_${i}`;
       if (updateData[reqField] !== undefined && updateData[reqField] !== null) {
@@ -279,30 +345,28 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
       }
     }
 
-
+    // Handle NOTE field
     if (updateData.note !== undefined && updateData.note !== null) {
       updateFields.push(`NOTE = :note`);
       bindParams.note = updateData.note;
     }
 
+    // Update other fields if any
+    let otherFieldsResult = null;
+    if (updateFields.length > 0) {
+      const updateQuery = `
+        UPDATE impedances 
+        SET ${updateFields.join(', ')} 
+        WHERE IMP_ID = :imp_id
+      `;
 
-    if (updateFields.length === 0) {
-      return res.status(400).json({ message: 'Không có trường dữ liệu nào được cung cấp để cập nhật' });
+      otherFieldsResult = await connection.execute(updateQuery, bindParams, { autoCommit: false });
     }
 
+    // Commit all changes
+    await connection.commit();
 
-    const updateQuery = `
-      UPDATE impedances 
-      SET ${updateFields.join(', ')} 
-      WHERE IMP_ID = :imp_id
-    `;
-
-    const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
-
-    if (result.rowsAffected === 0) {
-      return res.status(404).json({ message: 'Không tìm thấy bản ghi với ID đã cung cấp' });
-    }
-
+    // Get updated record
     const updatedRecord = await connection.execute(
       `SELECT IMP_ID AS imp_id,
        IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
@@ -333,28 +397,35 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
     if (!updatedRecord.rows || updatedRecord.rows.length === 0) {
       throw new Error('Failed to retrieve updated record');
     }
-    const updatedData = updatedRecord.rows[0];
-    for (let i = 1; i <= 136; i++) {
-      const upperKey = `IMP_${i}`;
-      const lowerKey = `imp_${i}`;
-      if (updatedData[upperKey] !== undefined) {
-        updatedData[lowerKey] = updatedData[upperKey];
-      }
-    }
 
-    if (updatedData.NOTE !== undefined) {
-      updatedData.note = updatedData.NOTE;
-    }
+    const updatedData = updatedRecord.rows[0];
 
     const response = {
       message: 'Cập nhật thành công',
-      data: updatedData
+      data: updatedData,
+      ...(bulkUpdatePerformed && affectedRecords.length > 0 && {
+        bulkUpdate: {
+          message: `Đã cập nhật trường "Tổng hợp dữ liệu đo thực tế" thành "${updateData.imp_137}" cho ${affectedRecords.length} bản ghi cùng mã hàng`,
+          affectedRecords: affectedRecords,
+          maHang: currentData.MA_HANG,
+          newValue: updateData.imp_137
+        }
+      })
     };
 
     res.json(response);
   } catch (err) {
+    // Rollback in case of error
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (rollbackErr) {
+        console.error('Error during rollback:', rollbackErr);
+      }
+    }
+
     console.error('Error updating impedance:', err);
-    console.log('Error details:', { // Changed from logDebug to console.log
+    console.log('Error details:', {
       message: err.message,
       stack: err.stack,
       code: err.code,
@@ -376,7 +447,6 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
     }
   }
 });
-
 router.put('/soft-delete-impedance/:impId', authenticateToken, checkEditPermission, async (req, res) => {
   const { impId } = req.params;
   let connection;
@@ -442,7 +512,7 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
     const { data } = req.body;
     if (!Array.isArray(data) || data.length === 0) {
       return res.status(400).json({ message: 'Dữ liệu không hợp lệ' });
-    }    connection = await database.getConnection();
+    } connection = await database.getConnection();
 
     for (const record of data) {
       if (!record.IMP_2) {
@@ -477,10 +547,10 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     let nextId = Number(idResult.rows[0].NEXT_ID);
 
-    
+
     // Đảm bảo nextId là số hợp lệ
     if (isNaN(nextId)) {
       nextId = 1;
@@ -516,10 +586,10 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
             continue;
           }
           const needsFormatting = (
-            ((i >= 52 && i <= 121) && 
-             ![77, 90, 97].includes(i) && 
-             i !== 58) || 
-            (i >= 122 && i <= 135 && ![126, 129, 131].includes(i)) 
+            ((i >= 52 && i <= 121) &&
+              ![77, 90, 97].includes(i) &&
+              i !== 58) ||
+            (i >= 122 && i <= 135 && ![126, 129, 131].includes(i))
           );
           if (needsFormatting) {
             if (typeof value === 'number') {
@@ -556,7 +626,7 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
               bindVars[key.toLowerCase()] = null;
             }
           }
-          
+
           columns.push(key);
           placeholders.push(`:${key.toLowerCase()}`);
           continue;
@@ -599,9 +669,9 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
 
   } catch (error) {
     console.error('Error importing impedance data:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Dữ liệu bạn import đã tồn tại hoặc có lỗi trong quá trình import',
-      error: error.message 
+      error: error.message
     });
   } finally {
     if (connection) {
