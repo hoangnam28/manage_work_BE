@@ -63,10 +63,6 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
                         <td>${materialData.name || 'N/A'}</td>
                     </tr>
                     <tr>
-                        <td style="padding: 5px 0; font-weight: bold;">Người xử lý:</td>
-                        <td>${materialData.handler || 'N/A'}</td>
-                    </tr>
-                    <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Ngày yêu cầu:</td>
                         <td>${materialData.request_date ? new Date(materialData.request_date).toLocaleDateString('vi-VN') : 'N/A'}</td>
                     </tr>

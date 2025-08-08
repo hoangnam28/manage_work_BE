@@ -792,7 +792,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
         
         // Chỉ gửi email khi chuyển từ Pending sang Approve
         if (oldStatus === 'Pending' && newStatus === 'Approve') {
-          const emailSubject = `[Material System] Material Core được phê duyệt - ID: ${id}`;
+          const emailSubject = `[Material System] Material Core được cập nhật - ID: ${id}`;
           const emailHTML = generateStatusUpdateEmailHTML(
             id, 
             oldStatus, 
