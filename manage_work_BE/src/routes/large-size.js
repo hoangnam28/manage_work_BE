@@ -679,7 +679,7 @@ router.put('/update/:id', async (req, res) => {
 
 router.delete('/delete/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  
+
   // Validate
   if (!id || isNaN(Number(id))) {
     return res.status(400).json({ message: 'ID không hợp lệ' });
@@ -688,7 +688,7 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
-    
+
     // Single query - soft delete
     const result = await connection.execute(
       `UPDATE large_size 
@@ -801,6 +801,56 @@ router.put('/restore/:id', async (req, res) => {
     );
 
     await connection.commit();
+
+    const emailContent = `
+  <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
+    <tr>
+      <th align="left">Mã sản phẩm</th>
+      <td>${oldRow.CUSTOMER_CODE || ''}</td>
+    </tr>
+    <tr>
+      <th align="left">Loại bo</th>
+      <td>${oldRow.TYPE_BOARD || ''}</td>
+    </tr>
+    <tr>
+      <th align="left">Kích thước Tối ưu</th>
+      <td>${oldRow.SIZE_NORMAL || ''}</td>
+    </tr>
+    <tr>
+      <th align="left">Tỷ lệ % (Bo thường)</th>
+      <td>${oldRow.RATE_NORMAL || ''}</td>
+    </tr>
+    <tr>
+      <th align="left">Kích thước bo to</th>
+      <td>${oldRow.SIZE_BIG || ''}</td>
+    </tr>
+    <tr>
+      <th align="left">Tỷ lệ % (Bo to)</th>
+      <td>${oldRow.RATE_BIG || ''}</td>
+    </tr>
+    <tr>
+      <th align="left">Người khôi phục</th>
+      <td>${req.user?.username || actionByEmail || 'N/A'}</td>
+    </tr>
+  </table>
+  <br>
+  <a href="http://192.84.105.173:8888/decide-board/${id}">Link xem chi tiết</a>
+  <br>
+  <br>
+  <p>Đây là email tự động từ hệ thống. Vui lòng không reply - Cảm ơn!</p>
+  <p>This is an automated email sent from the system. Please do not reply to all - Thank you!</p>
+`;
+
+    const mailRecipients = [...new Set([
+      ...AllEmails,
+      oldRow.CREATED_BY_EMAIL,
+    ].filter(Boolean))];
+
+    sendMail(
+      `Đã khôi phục yêu cầu sử dụng bo to mã hàng: ${oldRow.CUSTOMER_CODE || ''}`,
+      emailContent,
+      mailRecipients
+    );
 
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
@@ -960,7 +1010,7 @@ router.put('/cancel-request/:id', async (req, res) => {
 
     await connection.commit();
 
-      // Gửi email thông báo
+    // Gửi email thông báo
     const emailContent = `
       <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;">
         <tr>
@@ -1024,12 +1074,12 @@ router.put('/cancel-request/:id', async (req, res) => {
     });
   } catch (err) {
     if (connection) {
-      try { await connection.rollback(); } catch (e) {}
+      try { await connection.rollback(); } catch (e) { }
     }
     console.error('Error in PUT /cancel/:id:', err);
     res.status(500).json({ error: err.message });
   } finally {
-    if (connection) try { await connection.close(); } catch (e) {}
+    if (connection) try { await connection.close(); } catch (e) { }
   }
 });
 module.exports = router;

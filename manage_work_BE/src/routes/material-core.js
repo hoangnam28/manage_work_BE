@@ -4,7 +4,6 @@ const oracledb = require('oracledb');
 const database = require('../config/database');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
-const ExcelJS = require('exceljs');
 const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
@@ -945,7 +944,7 @@ router.post('/export-xlsm', async (req, res) => {
       'VENDOR', 'FAMILY', 'PREPREG_COUNT', 'NOMINAL_THICKNESS', 'SPEC_THICKNESS',
       'PREFERENCE_CLASS', 'USE_TYPE', 'RIGID', 'TOP_FOIL_CU_WEIGHT', 'BOT_FOIL_CU_WEIGHT',
       'TG_MIN', 'TG_MAX', 'CENTER_GLASS',
-      null, null, null, null, null, 'DK_01G', 'DF_01G', 'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ',
+      null, 'DK_01G', 'DF_01G', 'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ',
       'DK_0_02GHZ', 'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ',
       'DK_3GHZ', 'DF_3GHZ', 'DK_4GHZ', 'DF_4GHZ', 'DK_5GHZ', 'DF_5GHZ',
       'DK_6GHZ', 'DF_6GHZ', 'DK_7GHZ', 'DF_7GHZ',
@@ -1241,4 +1240,262 @@ router.post('/import-material-core', async (req, res) => {
   }
 });
 
+// Thêm route export XML vào cuối file material-core.js (trước module.exports = router;)
+
+// Helper function để chuyển đổi giá trị Cu Weight
+function convertCuWeight(value) {
+  const mapping = {
+    'L': '0.33 oz',
+    'H': '1 oz', 
+    '1': '1 oz',
+    '2': '2 oz',
+    'Z': '0 oz'
+  };
+  return mapping[value] || '0 oz';
+}
+
+// Helper function để format thickness
+function formatThickness(value) {
+  if (!value) return '0 mm';
+  return `${value} mm`;
+}
+
+// Helper function để format temperature 
+function formatTemperature(value) {
+  if (!value) return '0 C';
+  return `${value} C`;
+}
+
+// Helper function để format boolean
+function formatBoolean(value) {
+  if (value === 'TRUE' || value === true) return 'true';
+  return 'false';
+}
+
+// Helper function để tạo NAME và GENERIC_NAME
+function createCoreName(vendor, family, nominalThickness, topCu, botCu) {
+  const thickness = nominalThickness || '0.000';
+  const topCuDisplay = topCu === 'L' ? 'L' : (topCu === 'H' ? 'H' : topCu);
+  const botCuDisplay = botCu === 'L' ? 'L' : (botCu === 'H' ? 'H' : botCu);
+  
+  const name = `Core ${vendor || 'Unknown'} ${family || 'Unknown'} ${thickness}mm ${topCuDisplay}/${botCuDisplay}`;
+  const genericName = `${thickness}mm ${topCuDisplay}/${botCuDisplay}`;
+  
+  return { name, genericName };
+}
+
+// Route export XML
+router.get('/export-xml', authenticateToken, async (req, res) => {
+  let connection;
+  try {
+    connection = await database.getConnection();
+    
+    // Query chỉ lấy những bản ghi có status = 'Pending'
+    const result = await connection.execute(
+      `SELECT 
+        id,
+        requester_name,
+        request_date,
+        handler,
+        status,
+        complete_date,
+        vendor,
+        family,
+        prepreg_count,
+        nominal_thickness,
+        spec_thickness,
+        preference_class,
+        use_type,
+        rigid,
+        top_foil_cu_weight,
+        bot_foil_cu_weight,
+        tg_min,
+        tg_max,
+        center_glass,
+        DK_0_001GHZ_ as dk_0_001ghz,
+        DF_0_001GHZ_ as df_0_001ghz,
+        DK_0_01GHZ_ as dk_0_01ghz,
+        DF_0_01GHZ_ as df_0_01ghz,
+        DK_0_02GHZ_ as dk_0_02ghz,
+        DF_0_02GHZ_ as df_0_02ghz,
+        DK_2GHZ_ as dk_2ghz,
+        DF_2GHZ_ as df_2ghz,
+        DK_2_45GHZ_ as dk_2_45ghz,
+        DF_2_45GHZ_ as df_2_45ghz,
+        DK_3GHZ_ as dk_3ghz,
+        DF_3GHZ_ as df_3ghz,
+        DK_4GHZ_ as dk_4ghz,
+        DF_4GHZ_ as df_4ghz,
+        DK_5GHZ_ as dk_5ghz,
+        DF_5GHZ_ as df_5ghz,
+        DK_6GHZ_ as dk_6ghz,
+        DF_6GHZ_ as df_6ghz,
+        DK_7GHZ_ as dk_7ghz,
+        DF_7GHZ_ as df_7ghz,
+        DK_8GHZ_ as dk_8ghz,
+        DF_8GHZ_ as df_8ghz,
+        DK_9GHZ_ as dk_9ghz,
+        DF_9GHZ_ as df_9ghz,
+        DK_10GHZ_ as dk_10ghz,
+        DF_10GHZ_ as df_10ghz,
+        DK_15GHZ_ as dk_15ghz,
+        DF_15GHZ_ as df_15ghz,
+        DK_16GHZ_ as dk_16ghz,
+        DF_16GHZ_ as df_16ghz,
+        DK_20GHZ_ as dk_20ghz,
+        DF_20GHZ_ as df_20ghz,
+        DK_01G as dk_01g,
+        DF_01G as df_01g,
+        DK_25GHZ_ as dk_25ghz,
+        DF_25GHZ_ as df_25ghz,
+        DK_30GHZ_ as dk_30ghz,
+        DF_30GHZ_ as df_30ghz,
+        DK_35GHZ__ as dk_35ghz,
+        DF_35GHZ__ as df_35ghz,
+        DK_40GHZ_ as dk_40ghz,
+        DF_40GHZ_ as df_40ghz,
+        DK_45GHZ_ as dk_45ghz,
+        DF_45GHZ_ as df_45ghz,
+        DK_50GHZ_ as dk_50ghz,
+        DF_50GHZ_ as df_50ghz,
+        DK_55GHZ_ as dk_55ghz,
+        DF_55GHZ_ as df_55ghz,
+        is_hf,
+        data_source,
+        filename
+       FROM material_core
+       WHERE is_deleted = 0 AND status = 'Pending'
+       ORDER BY id DESC`,
+      {},
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: 'Không tìm thấy bản ghi nào có trạng thái Pending để xuất'
+      });
+    }
+
+    // Tạo XML content
+    let xmlContent = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<document xmlns:site='http://www.frontline-pcb.com/'
+	schema='none'
+	user='DataCollection Template'
+	ver='7.7'
+>
+<interfacelist INTERFACE="CORE">`;
+
+    // Tạo XML cho từng bản ghi
+    result.rows.forEach(row => {
+      const { name, genericName } = createCoreName(
+        row.VENDOR, 
+        row.FAMILY, 
+        row.NOMINAL_THICKNESS,
+        row.TOP_FOIL_CU_WEIGHT,
+        row.BOT_FOIL_CU_WEIGHT
+      );
+
+      xmlContent += `
+	<CORE
+		NAME="${name}"
+		GENERIC_NAME="${genericName}"
+		VENDOR="${row.VENDOR || ''}"
+		FAMILY="${row.FAMILY || ''}"
+		PREPREG_COUNT="${row.PREPREG_COUNT || '1'}"
+		NOMINAL_THICKNESS_="${formatThickness(row.NOMINAL_THICKNESS)}"
+		SPEC_THK_="${formatThickness(row.SPEC_THICKNESS)}"
+		PREFERENCE_CLASS_="${row.PREFERENCE_CLASS || '1'}"
+		H_USE_TYPE_="${row.USE_TYPE || ''}"
+		RIGID_="${formatBoolean(row.RIGID)}"
+		TOP_FOIL_CU_WEIGHT="${convertCuWeight(row.TOP_FOIL_CU_WEIGHT)}"
+		BOT_FOIL_CU_WEIGHT="${convertCuWeight(row.BOT_FOIL_CU_WEIGHT)}"
+		TG_MIN="${formatTemperature(row.TG_MIN)}"
+		TG_MAX="${formatTemperature(row.TG_MAX)}"
+		CENTER_GLASS_="${row.CENTER_GLASS || ''}"
+		MATERIAL_CLASS_="C"
+		DK_01G_="${row.DK_01G || '0'}"
+		DF_01G_="${row.DF_01G || '0'}"
+		DK_0_001GHZ_="${row.DK_0_001GHZ || '0'}"
+		DF_0_001GHZ_="${row.DF_0_001GHZ || '0'}"
+		DK_0_01GHZ_="${row.DK_0_01GHZ || '0'}"
+		DF_0_01GHZ_="${row.DF_0_01GHZ || '0'}"
+		DK_0_02GHZ_="${row.DK_0_02GHZ || '0'}"
+		DF_0_02GHZ_="${row.DF_0_02GHZ || '0'}"
+		DK_2GHZ_="${row.DK_2GHZ || '0'}"
+		DF_2GHZ_="${row.DF_2GHZ || '0'}"
+		DK_3GHZ_="${row.DK_3GHZ || '0'}"
+		DF_3GHZ_="${row.DF_3GHZ || '0'}"
+		DK_4GHZ_="${row.DK_4GHZ || '0'}"
+		DF_4GHZ_="${row.DF_4GHZ || '0'}"
+		DK_5GHZ_="${row.DK_5GHZ || '0'}"
+		DF_5GHZ_="${row.DF_5GHZ || '0'}"
+		DK_6GHZ_="${row.DK_6GHZ || '0'}"
+		DF_6GHZ_="${row.DF_6GHZ || '0'}"
+		DK_7GHZ_="${row.DK_7GHZ || '0'}"
+		DF_7GHZ_="${row.DF_7GHZ || '0'}"
+		DK_8GHZ_="${row.DK_8GHZ || '0'}"
+		DF_8GHZ_="${row.DF_8GHZ || '0'}"
+		DK_9GHZ_="${row.DK_9GHZ || '0'}"
+		DF_9GHZ_="${row.DF_9GHZ || '0'}"
+		DK_10GHZ_="${row.DK_10GHZ || '0'}"
+		DF_10GHZ_="${row.DF_10GHZ || '0'}"
+		DK_12GHZ_="0"
+		DK_15GHZ_="${row.DK_15GHZ || '0'}"
+		DK_18GHZ_="0"
+		DK_20GHZ_="${row.DK_20GHZ || '0'}"
+		DK_25GHZ_="${row.DK_25GHZ || '0'}"
+		DK_30GHZ_="${row.DK_30GHZ || '0'}"
+		DK_35GHZ_="${row.DK_35GHZ || '0'}"
+		DK_40GHZ_="${row.DK_40GHZ || '0'}"
+		DK_45GHZ_="${row.DK_45GHZ || '0'}"
+		DK_50GHZ_="${row.DK_50GHZ || '0'}"
+		DF_12GHZ_="0"
+		DF_15GHZ_="${row.DF_15GHZ || '0'}"
+		DF_18GHZ_="0"
+		DF_20GHZ_="${row.DF_20GHZ || '0'}"
+		DF_25GHZ_="${row.DF_25GHZ || '0'}"
+		DF_30GHZ_="${row.DF_30GHZ || '0'}"
+		DF_35GHZ_="${row.DF_35GHZ || '0'}"
+		DF_40GHZ_="${row.DF_40GHZ || '0'}"
+		DF_45GHZ_="${row.DF_45GHZ || '0'}"
+		DF_50GHZ_="${row.DF_50GHZ || '0'}"
+		IS_HF_="${formatBoolean(row.IS_HF)}"
+		DATA_SOURCE_="${row.DATA_SOURCE || row.FILENAME || ''}"
+		TOP_FOIL_OUTER_ROUGHNESS="0 micron"
+		TOP_FOIL_INNER_ROUGHNESS="0 micron"
+		BOT_FOIL_OUTER_ROUGHNESS="0 micron"
+		BOT_FOIL_INNER_ROUGHNESS="0 micron"
+		OBSOLETE="false"
+		SUB_TYPE_="${row.FAMILY || ''}"
+	/>`;
+    });
+
+    xmlContent += `
+</interfacelist>
+</document>`;
+
+    // Set headers để download file
+    const filename = `MaterialCore_Pending_Export.xml`;
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    
+    res.send(xmlContent);
+
+  } catch (err) {
+    console.error('Error exporting XML:', err);
+    res.status(500).json({
+      message: 'Lỗi khi xuất file XML',
+      error: err.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
+    }
+  }
+});
 module.exports = router;
