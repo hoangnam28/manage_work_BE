@@ -45,22 +45,39 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Thêm bản ghi lịch sử với các trường chi tiết
 async function addHistoryRecord(connection, { materialCoreId, actionType, createdBy, data }) {
   try {
-    // Validate required parameters
     if (!materialCoreId || !actionType || !createdBy) {
       throw new Error('Missing required parameters: materialCoreId, actionType, or createdBy');
     }
 
-    // Handle undefined or null data object
     if (!data) {
       console.warn('Data object is undefined or null, using empty object');
       data = {};
     }
-    let historyId;
     
-    // Try to use sequence first
+    // Đảm bảo status không bị null
+    if (!data.status) {
+      // Nếu là action xóa, set status là 'Deleted'
+      if (actionType === 'DELETE') {
+        data.status = 'Cancel';
+      } else {
+        // Đối với các action khác, lấy status hiện tại từ material_core
+        const currentStatusResult = await connection.execute(
+          `SELECT status FROM material_core WHERE id = :id`,
+          { id: materialCoreId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        
+        if (currentStatusResult.rows && currentStatusResult.rows.length > 0) {
+          data.status = currentStatusResult.rows[0].STATUS;
+        } else {
+          data.status = 'Unknown'; 
+        }
+      }
+    }
+    let historyId;
+
     try {
       const seqResult = await connection.execute(
         `SELECT material_core_history_seq.NEXTVAL FROM DUAL`
@@ -68,7 +85,6 @@ async function addHistoryRecord(connection, { materialCoreId, actionType, create
       historyId = seqResult.rows[0][0];
     } catch (seqError) {
       console.log('Sequence not found, using MAX+1 approach');
-      // If sequence doesn't exist, use MAX+1
       const maxResult = await connection.execute(
         `SELECT NVL(MAX(id), 0) + 1 FROM material_core_history`
       );
@@ -93,7 +109,7 @@ async function addHistoryRecord(connection, { materialCoreId, actionType, create
         dk_25ghz, df_25ghz, dk_30ghz, df_30ghz,
         dk_35ghz, df_35ghz, dk_40ghz, df_40ghz,
         dk_45ghz, df_45ghz, dk_50ghz, df_50ghz,
-        dk_55ghz, df_55ghz, is_hf, data_source, filename
+        dk_55ghz, df_55ghz, is_hf, data_source, status, filename
       ) VALUES (
         :id, :materialCoreId, :actionType, :createdBy, CURRENT_TIMESTAMP,
         :vendor, :family, :prepreg_count, :nominal_thickness, :spec_thickness,
@@ -110,14 +126,13 @@ async function addHistoryRecord(connection, { materialCoreId, actionType, create
         :dk_25ghz, :df_25ghz, :dk_30ghz, :df_30ghz,
         :dk_35ghz, :df_35ghz, :dk_40ghz, :df_40ghz,
         :dk_45ghz, :df_45ghz, :dk_50ghz, :df_50ghz,
-        :dk_55ghz, :df_55ghz, :is_hf, :data_source, :filename
+        :dk_55ghz, :df_55ghz, :is_hf, :data_source, :status, :filename
       )`,
       {
         id: historyId,
         materialCoreId,
         actionType,
         createdBy,
-        // Use optional chaining or default values to prevent undefined errors
         vendor: data?.vendor || null,
         family: data?.family || null,
         prepreg_count: data?.prepreg_count || null,
@@ -181,6 +196,7 @@ async function addHistoryRecord(connection, { materialCoreId, actionType, create
         df_55ghz: data?.df_55ghz || null,
         is_hf: data?.is_hf || null,
         data_source: data?.data_source || null,
+        status: data?.status || null,
         filename: data?.filename || null
       },
       { autoCommit: true }

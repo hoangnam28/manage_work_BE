@@ -6,21 +6,77 @@ require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
 const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
-const { 
-    generateCreateMaterialEmailHTML, 
-    generateStatusUpdateEmailHTML, 
-    sendMailMaterialPP
+const {
+  generateCreateMaterialEmailHTML,
+  generateStatusUpdateEmailHTML,
+  generateMaterialChangeEmailHTML,
+  sendMailMaterialPP
 } = require('../helper/sendMailMaterialPP');
 
-const { authenticateToken } = require('../middleware/auth');
+const AllEmails = [
+  'trang.nguyenkieu@meiko-elec.com',
+  'thuy.nguyen2@meiko-elec.com'
+];
+
+const {
+  authenticateToken,
+  checkMaterialCorePermission
+} = require('../middleware/auth');
 const { addHistoryPpRecord } = require('./material-pp-history');
 
-// Lấy danh sách material core
-router.get('/list', authenticateToken, async (req, res) => {
+router.get('/list', authenticateToken, checkMaterialCorePermission(['view']), async (req, res) => {
   let connection;
   try {
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const allowedPageSize = [10, 20, 50, 100];
+    const validPageSize = allowedPageSize.includes(pageSize) ? pageSize : 10;
+    const offset = (page - 1) * validPageSize;
+    const searchConditions = [];
+    const searchBindings = {};
+
+
+    Object.keys(req.query).forEach(key => {
+      const columnNames = ['FAMILY', 'GLASS_STYLE', 'RESIN_PERCENTAGE', 'IS_HF'];
+      if (columnNames.includes(key.toUpperCase()) && req.query[key] && req.query[key].trim() !== '') {
+        const fieldName = key.toUpperCase();
+        const searchValue = req.query[key];
+        const paramName = `SEARCH_${fieldName}`;
+        searchConditions.push(`UPPER(${fieldName}) LIKE :${paramName}`);
+        searchBindings[paramName] = `%${searchValue.toUpperCase()}%`;
+      }
+
+      // Xử lý search_ prefix (backward compatibility)
+      if (key.startsWith('search_')) {
+        const fieldName = key.replace('search_', '').toUpperCase();
+        const searchValue = req.query[key];
+        if (searchValue && searchValue.trim() !== '') {
+          const paramName = `SEARCH_${fieldName}`;
+          searchConditions.push(`UPPER(${fieldName}) LIKE :${paramName}`);
+          searchBindings[paramName] = `%${searchValue.toUpperCase()}%`;
+        }
+      }
+    });
+
     connection = await database.getConnection();
-    const result = await connection.execute(`SELECT 
+
+    // Tạo WHERE clause với điều kiện tìm kiếm
+    const searchWhere = searchConditions.length > 0
+      ? `AND ${searchConditions.join(' AND ')}`
+      : '';
+
+    // Query để đếm tổng số records
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM material_properties
+      WHERE is_deleted = 0 ${searchWhere}
+    `;
+
+    // Xây dựng query chính với pagination
+    const mainQuery = `
+      SELECT * FROM (
+        SELECT a.*, ROW_NUMBER() OVER (ORDER BY id DESC) as row_num FROM (
+          SELECT 
         id,
         name,
         request_date,
@@ -78,12 +134,36 @@ router.get('/list', authenticateToken, async (req, res) => {
         DF_25GHZ_ as df_25ghz
        FROM material_properties
        WHERE is_deleted = 0
-       ORDER BY id DESC`,
-      {},
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
+          ${searchWhere}
+        ) a
+      ) WHERE row_num > :offset AND row_num <= :limit`;
+
+    // Chuẩn bị bind parameters cho cả search và pagination
+    const queryParams = {
+      offset: offset,
+      limit: offset + validPageSize,
+      ...searchBindings // Thêm các bind parameters cho điều kiện tìm kiếm
+    };
+
+    // Thực hiện cả 2 query song song với cùng một bộ params
+    const [countResult, dataResult] = await Promise.all([
+      connection.execute(countQuery, searchBindings, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
+      connection.execute(mainQuery, queryParams, { outFormat: oracledb.OUT_FORMAT_OBJECT })
+    ]);
+
+    const totalRecords = countResult.rows[0].TOTAL;
+    const totalPages = Math.ceil(totalRecords / validPageSize);
+
     res.json({
-      data: result.rows
+      data: dataResult.rows,
+      pagination: {
+        currentPage: page,
+        pageSize: validPageSize,
+        totalRecords: totalRecords,
+        totalPages: totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
     });
   } catch (err) {
     console.error('Error in /list route:', err);
@@ -103,11 +183,27 @@ router.get('/list', authenticateToken, async (req, res) => {
 });
 
 // Thêm mới material core
-router.post('/create', authenticateToken, async (req, res) => {
+router.post('/create', authenticateToken, checkMaterialCorePermission(['create']), async (req, res) => {
   let connection;
   try {
+    connection = await database.getConnection();
     const data = req.body;
-     let resinArr = [];
+    let creatorEmail = null;
+    if (req.user && req.user.email) {
+      try {
+        const userResult = await connection.execute(
+          'SELECT email FROM users WHERE user_id = :userId AND is_deleted =0',
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows && userResult.rows.length > 0) {
+          creatorEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (emailError) {
+        console.error('Warning: Failed to fetch creator email:', emailError);
+      }
+    }
+    let resinArr = [];
     if (typeof data.resin_percentage === 'string') {
       resinArr = data.resin_percentage.split(',').map(v => Number(v.trim())).filter(v => !isNaN(v));
     } else if (Array.isArray(data.resin_percentage)) {
@@ -115,9 +211,8 @@ router.post('/create', authenticateToken, async (req, res) => {
     } else {
       resinArr = [Number(data.resin_percentage)];
     }
-     const createdRecords = [];
+    const createdRecords = [];
     for (const resin of resinArr) {
-      connection = await database.getConnection();
       const result = await connection.execute(
         `SELECT material_properties_seq.NEXTVAL FROM DUAL`
       );
@@ -303,13 +398,18 @@ router.post('/create', authenticateToken, async (req, res) => {
       message: 'Material pp(s) created successfully',
       data: createdRecords
     });
-        // Sử dụng setImmediate hoặc process.nextTick để chạy sau khi response đã gửi
+    // Sử dụng setImmediate hoặc process.nextTick để chạy sau khi response đã gửi
     setImmediate(async () => {
       try {
-        const emailSubject = `[Material System] Tạo mới Material PP - ${data.vendor || 'N/A'} | ${data.family || 'N/A'}`;
+        const emailSubject = `[Material System]📝 Tạo mới Material PP - ${data.vendor || 'N/A'} | ${data.family || 'N/A'}`;
         const emailHTML = generateCreateMaterialEmailHTML(data, createdRecords);
-        
-        await sendMailMaterialPP(emailSubject, emailHTML);
+        let recipients = [...AllEmails];
+        if (creatorEmail && !recipients.includes(creatorEmail)) {
+          recipients.push(creatorEmail);
+        }
+        recipients = [...new Set(recipients)];
+
+        await sendMailMaterialPP(emailSubject, emailHTML, recipients);
         console.log('Email notification sent successfully for new material creation');
       } catch (emailError) {
         console.error('Warning: Failed to send email notification:', emailError);
@@ -339,6 +439,31 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
   let connection;
+  const isStatusUpdate = updateData.status && Object.keys(updateData).length <= 3;
+  if (isStatusUpdate) {
+    // Chỉ admin mới có thể approve/cancel
+    const hasApprovePermission = checkMaterialCorePermission(['approve']);
+    try {
+      hasApprovePermission(req, res, () => { }); // Test permission
+    } catch (error) {
+      return res.status(403).json({
+        message: 'Chỉ Admin mới có quyền Approve/Cancel',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+    }
+  } else {
+    // Cập nhật thông tin khác - admin và edit
+    const hasEditPermission = checkMaterialCorePermission(['edit']);
+    try {
+      hasEditPermission(req, res, () => { }); // Test permission
+    } catch (error) {
+      return res.status(403).json({
+        message: 'Bạn không có quyền chỉnh sửa',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+    }
+  }
+  const isOnlyStatusUpdate = updateData.status && Object.keys(updateData).length === 1;
 
   try {
     if (!id) {
@@ -348,7 +473,33 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     }
 
     connection = await database.getConnection();
+    let creatorEmail = null;
+    if (req.user && req.user.userId) {
+      try {
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          creatorEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (userError) {
+        console.error('Error fetching user email:', userError);
+      }
+    }
+    const oldRecord = await connection.execute(
+      `SELECT * FROM material_properties WHERE id = :id`,
+      { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
 
+    if (oldRecord.rows.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
+    }
+
+    const oldStatus = oldRecord.rows[0].STATUS;
+    const oldRecordData = oldRecord.rows[0];
     if (updateData.status && !['Approve', 'Cancel', 'Pending'].includes(updateData.status)) {
       return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
     }
@@ -357,20 +508,13 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
     }
 
-    // ✅ THÊM: Lấy thông tin cũ trước khi cập nhật
-    let oldStatus = null;
-    let oldRecord = null;
     if (updateData.status) {
       const oldResult = await connection.execute(
         `SELECT status, vendor, family, name FROM material_properties WHERE id = :id`,
         { id },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
-      
-      if (oldResult.rows.length > 0) {
-        oldRecord = oldResult.rows[0];
-        oldStatus = oldRecord.STATUS;
-      }
+
     }
 
     const updateFields = [];
@@ -505,25 +649,28 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
         try {
           const materialInfo = updatedRecord.rows[0];
           const newStatus = updateData.status;
-          
-          // Chỉ gửi email khi chuyển từ Pending sang Approve hoặc Cancel
-          if (oldStatus === 'Pending' && (newStatus === 'Approve' || newStatus === 'Cancel')) {
-            const emailSubject = `[Material System] Material PP được cập nhật - ID: ${id}`;
-            const emailHTML = generateStatusUpdateEmailHTML(
-              id, 
-              oldStatus, 
-              newStatus, 
-              req.user.username,
-              {
-                vendor: materialInfo.VENDOR,
-                family: materialInfo.FAMILY,
-                name: materialInfo.NAME
-              }
-            );
-            
-            await sendMailMaterialPP(emailSubject, emailHTML);
-            console.log(`✅ Email notification sent for status change: ${oldStatus} -> ${newStatus}`);
+
+
+          const emailSubject = `[Material System] ✅ Đã cập nhật trạng thái Material PP - ${materialInfo.VENDOR || 'N/A'}`;
+          const emailHTML = generateStatusUpdateEmailHTML(
+            id,
+            oldStatus,
+            newStatus,
+            req.user?.username || 'System',
+            {
+              vendor: materialInfo.VENDOR,
+              family: materialInfo.FAMILY,
+              name: materialInfo.NAME
+            }
+          );
+          let recipients = [...AllEmails];
+          if (creatorEmail && !recipients.includes(creatorEmail)) {
+            recipients.push(creatorEmail);
           }
+          recipients = [...new Set(recipients)];
+
+          await sendMailMaterialPP(emailSubject, emailHTML);
+          console.log(`✅ Email notification sent for status change: ${oldStatus} -> ${newStatus}`);
         } catch (emailError) {
           console.error('❌ Warning: Failed to send status update email:', emailError);
         }
@@ -534,9 +681,125 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     await addHistoryPpRecord(connection, {
       materialPpId: id,
       actionType: 'UPDATE',
-      data: updateData, 
+      data: updateData,
       createdBy: req.user.username
     });
+    if (oldStatus === 'Approve' && !isOnlyStatusUpdate) {
+      setImmediate(async () => {
+        try {
+          // So sánh các giá trị để tìm ra thay đổi
+          const changes = [];
+          const fieldLabels = {
+            name: 'Người yêu cầu',
+            request_date: 'Ngày yêu cầu',
+            handler: 'Người xử lý',
+            vendor: 'vendor',
+            family: 'family',
+            glass_style: 'glass_style',
+            resin_percentage: 'resin_percentage',
+            preference_class: 'preference_class',
+            use_type: 'use_type',
+            pp_type: 'pp_type',
+            tg_min: 'tg_min',
+            tg_max: 'tg_max',
+            dk_01g: 'DK 01G',
+            df_01g: 'DF 01G',
+            dk_0_001ghz: 'DK 0.001GHz',
+            df_0_001ghz: 'DF 0.001GHz',
+            dk_0_01ghz: 'DK 0.01GHz',
+            df_0_01ghz: 'DF 0.01GHz',
+            dk_0_02ghz: 'DK 0.02GHz',
+            df_0_02ghz: 'DF 0.02GHz',
+            dk_2ghz: 'DK 2GHz',
+            df_2ghz: 'DF 2GHz',
+            dk_2_45ghz: 'DK 2.45GHz',
+            df_2_45ghz: 'DF 2.45GHz',
+            dk_3ghz: 'DK 3GHz',
+            df_3ghz: 'DF 3GHz',
+            dk_4ghz: 'DK 4GHz',
+            df_4ghz: 'DF 4GHz',
+            dk_5ghz: 'DK 5GHz',
+            df_5ghz: 'DF 5GHz',
+            dk_6ghz: 'DK 6GHz',
+            df_6ghz: 'DF 6GHz',
+            dk_7ghz: 'DK 7GHz',
+            df_7ghz: 'DF 7GHz',
+            dk_8ghz: 'DK 8GHz',
+            df_8ghz: 'DF 8GHz',
+            dk_9ghz: 'DK 9GHz',
+            df_9ghz: 'DF 9GHz',
+            dk_10ghz: 'DK 10GHz',
+            df_10ghz: 'DF 10GHz',
+            dk_15ghz: 'DK 15GHz',
+            df_15ghz: 'DF 15GHz',
+            dk_16ghz: 'DK 16GHz',
+            df_16ghz: 'DF 16GHz',
+            dk_20ghz: 'DK 20GHz',
+            df_20ghz: 'DF 20GHz',
+            dk_25ghz: 'DK 25GHz',
+            df_25ghz: 'DF 25GHz',
+            is_hf: 'Is HF',
+            data_source: 'Data Source',
+            filename: 'Filename'
+          };
+
+          Object.keys(updateData).forEach(key => {
+            if (key !== 'status' && columnMapping[key]) {
+              const dbColumnName = columnMapping[key].toUpperCase();
+              const oldValue = oldRecordData[dbColumnName];
+              const newValue = updateData[key];
+
+              // So sánh giá trị (xử lý cho cả string và number)
+              const isChanged = oldValue !== newValue &&
+                !(oldValue == null && (newValue === '' || newValue == null)) &&
+                !(newValue == null && (oldValue === '' || oldValue == null));
+
+              if (isChanged) {
+                changes.push({
+                  field: fieldLabels[key] || key,
+                  fieldKey: key,
+                  oldValue: oldValue || 'Không có',
+                  newValue: newValue || 'Không có'
+                });
+              }
+            }
+          });
+
+          if (changes.length > 0) {
+            console.log(`Found ${changes.length} changes for approved material ID: ${id}`);
+
+            const emailSubject = `[Material System] ⚠️ Thay đổi dữ liệu Material PP đã được cập nhật ${VENDOR}`;
+            const emailHTML = generateMaterialChangeEmailHTML(
+              id,
+              changes,
+              req.user?.username || 'System',
+              {
+                vendor: oldRecordData.VENDOR,
+                family: oldRecordData.FAMILY,
+                name: oldRecordData.NAME,
+                resinPercentage: oldRecordData.RESIN_PERCENTAGE || 'N/A',
+                preferenceClass: oldRecordData.PREFERENCE_CLASS || 'N/A',
+                useType: oldRecordData.USE_TYPE || 'N/A',
+                ppType: oldRecordData.PP_TYPE || 'N/A',
+                tgMin: oldRecordData.TG_MIN || 'N/A',
+
+              }
+            );
+            let recipients = [...AllEmails];
+            if (creatorEmail && !recipients.includes(creatorEmail)) {
+              recipients.push(creatorEmail);
+            }
+            recipients = [...new Set(recipients)];
+
+            await sendMailMaterialPP(emailSubject, emailHTML, recipients);
+            console.log(`✅ Email sent successfully for material changes in approved record (ID: ${id})`);
+          }
+
+        } catch (emailError) {
+          console.error('❌ Failed to send material change email:', emailError);
+        }
+      });
+    }
 
     res.json({
       message: 'Cập nhật thành công',
@@ -558,7 +821,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     }
   }
 });
-router.delete('/delete/:id', authenticateToken, async (req, res) => {
+router.delete('/delete/:id', authenticateToken, checkMaterialCorePermission(['delete']), async (req, res) => {
   let { id } = req.params;
   let connection;
   try {
@@ -623,7 +886,7 @@ function cloneFileSync(src, dest) {
   fs.copyFileSync(src, dest);
 }
 
-router.post('/export-xlsm', async (req, res) => {
+router.post('/export-xlsm', authenticateToken, checkMaterialCorePermission(['view']), async (req, res) => {
   try {
     const data = req.body.data;
     if (!data || !Array.isArray(data)) {
@@ -650,17 +913,17 @@ router.post('/export-xlsm', async (req, res) => {
     const ws = workbook.Sheets[sheetName];
 
     const map = [
-      'VENDOR','FAMILY','GLASS_STYLE','RESIN_PERCENTAGE', null, null,
-      'PREFERENCE_CLASS','USE_TYPE', 'PP_TYPE',
-      'TG_MIN','TG_MAX','CENTER_GLASS',null, null,'DK_01G','DF_01G','DK_0_001GHZ','DF_0_001GHZ','DK_0_01GHZ','DF_0_01GHZ',
-      'DK_0_02GHZ','DF_0_02GHZ','DK_2GHZ','DF_2GHZ','DK_2_45GHZ','DF_2_45GHZ',
-      'DK_3GHZ','DF_3GHZ','DK_4GHZ', 'DF_4GHZ','DK_5GHZ','DF_5GHZ',
-      'DK_6GHZ', 'DF_6GHZ','DK_7GHZ', 'DF_7GHZ',
-      'DK_8GHZ','DF_8GHZ','DK_9GHZ', 'DF_9GHZ','DK_10GHZ','DF_10GHZ','DK_15GHZ','DF_15GHZ',
-      'DK_16GHZ','DF_16GHZ','DK_20GHZ','DF_20GHZ','DK_25GHZ','DF_25GHZ',
-      'DK_30GHZ','DF_30GHZ','DK_35GHZ__','DF_35GHZ__','DK_40GHZ','DF_40GHZ',
-      'DK_45GHZ','DF_45GHZ','DK_50GHZ','DF_50GHZ','DK_55GHZ','DF_55GHZ',
-      'IS_HF','DATA_SOURCE'
+      'VENDOR', 'FAMILY', 'GLASS_STYLE', 'RESIN_PERCENTAGE', null, null,
+      'PREFERENCE_CLASS', 'USE_TYPE', 'PP_TYPE',
+      'TG_MIN', 'TG_MAX', 'CENTER_GLASS', null, null, 'DK_01G', 'DF_01G', 'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ',
+      'DK_0_02GHZ', 'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ',
+      'DK_3GHZ', 'DF_3GHZ', 'DK_4GHZ', 'DF_4GHZ', 'DK_5GHZ', 'DF_5GHZ',
+      'DK_6GHZ', 'DF_6GHZ', 'DK_7GHZ', 'DF_7GHZ',
+      'DK_8GHZ', 'DF_8GHZ', 'DK_9GHZ', 'DF_9GHZ', 'DK_10GHZ', 'DF_10GHZ', 'DK_15GHZ', 'DF_15GHZ',
+      'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ', 'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ',
+      'DK_30GHZ', 'DF_30GHZ', 'DK_35GHZ__', 'DF_35GHZ__', 'DK_40GHZ', 'DF_40GHZ',
+      'DK_45GHZ', 'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ',
+      'IS_HF', 'DATA_SOURCE'
     ];
 
     data.forEach((row, idx) => {
@@ -708,7 +971,7 @@ router.post('/export-xlsm', async (req, res) => {
 
 
 
-router.post('/import-material-pp', async (req, res) => {
+router.post('/import-material-pp', authenticateToken, checkMaterialCorePermission(['create']), async (req, res) => {
   let connection;
 
   try {
@@ -735,68 +998,68 @@ router.post('/import-material-pp', async (req, res) => {
           return String(value).trim();
       }
     };
-  const normalizeIsHf = (value) => {
-  if (value === null || value === undefined || value === '') return null;
-  const normalized = String(value).trim().toUpperCase();
-  return (normalized === 'TRUE' || normalized === 'FALSE') ? normalized : null;
-};
+    const normalizeIsHf = (value) => {
+      if (value === null || value === undefined || value === '') return null;
+      const normalized = String(value).trim().toUpperCase();
+      return (normalized === 'TRUE' || normalized === 'FALSE') ? normalized : null;
+    };
 
-const mapExcelKeysToDbKeys = (excelRow) => ({
-  name: safeValue(excelRow.NAME),
-  request_date: safeValue(excelRow.REQUEST_DATE, 'date'),
-  handler: safeValue(excelRow.HANDLER),
-  status: safeValue(excelRow.STATUS) || 'Pending',
-  complete_date: safeValue(excelRow.COMPLETE_DATE, 'date'),
-  vendor: safeValue(excelRow.VENDOR),
-  family: safeValue(excelRow.FAMILY),
-  glass_style: safeValue(excelRow.GLASS_STYLE),
-  resin_percentage: safeValue(excelRow.RESIN_PERCENTAGE, 'number'),
-  rav_thickness: safeValue(excelRow.RAV_THICKNESS),
-  preference_class: safeValue(excelRow.PREFERENCE_CLASS_, 'number'),
-  use_type: safeValue(excelRow.H_USE_TYPE_),
-  pp_type: safeValue(excelRow.PP_TYPE_),
-  tg_min: safeValue(excelRow.TG_MIN, 'number'),
-  tg_max: safeValue(excelRow.TG_MAX, 'number'),
-  dk_01g: safeValue(excelRow.DK_01G_, 'number'),
-  df_01g: safeValue(excelRow.DF_01G_, 'number'),
-  dk_0_001ghz: safeValue(excelRow['DK_0_001GHz_'], 'number'),
-  df_0_001ghz: safeValue(excelRow['DF_0_001GHz_'], 'number'),
-  dk_0_01ghz: safeValue(excelRow['DK_0_01MHz_'], 'number'),
-  df_0_01ghz: safeValue(excelRow['DF_0_01GHz_'], 'number'),
-  dk_0_02ghz: safeValue(excelRow['DK_0_02MHz_'], 'number'),
-  df_0_02ghz: safeValue(excelRow['DF_0_02GHz_'], 'number'),
-  dk_2ghz: safeValue(excelRow['DK_2G_'], 'number'),
-  df_2ghz: safeValue(excelRow['DF_2G_'], 'number'),
-  dk_2_45ghz: safeValue(excelRow['DK_2.45G_'], 'number'),
-  df_2_45ghz: safeValue(excelRow['DF_2.45G_'], 'number'),
-  dk_3ghz: safeValue(excelRow['DK_3G_'], 'number'),
-  df_3ghz: safeValue(excelRow['DF_3G_'], 'number'),
-  dk_4ghz: safeValue(excelRow['DK_4G_'], 'number'),
-  df_4ghz: safeValue(excelRow['DF_4G_'], 'number'),
-  dk_5ghz: safeValue(excelRow['DK_5G_'], 'number'),
-  df_5ghz: safeValue(excelRow['DF_5G_'], 'number'),
-  dk_6ghz: safeValue(excelRow['DK_6G_'], 'number'),
-  df_6ghz: safeValue(excelRow['DF_6G_'], 'number'),
-  dk_7ghz: safeValue(excelRow['DK_7G_'], 'number'),
-  df_7ghz: safeValue(excelRow['DF_7G_'], 'number'),
-  dk_8ghz: safeValue(excelRow['DK_8G_'], 'number'),
-  df_8ghz: safeValue(excelRow['DF_8G_'], 'number'),
-  dk_9ghz: safeValue(excelRow['DK_9G_'], 'number'),
-  df_9ghz: safeValue(excelRow['DF_9G_'], 'number'),
-  dk_10ghz: safeValue(excelRow['DK_10G_'], 'number'),
-  df_10ghz: safeValue(excelRow['DF_10G_'], 'number'),
-  dk_15ghz: safeValue(excelRow['DK_15G_'], 'number'),
-  df_15ghz: safeValue(excelRow['DF_15G_'], 'number'),
-  dk_16ghz: safeValue(excelRow['DK_16G_'], 'number'),
-  df_16ghz: safeValue(excelRow['DF_16G_'], 'number'),
-  dk_20ghz: safeValue(excelRow['DK_20G_'], 'number'),
-  df_20ghz: safeValue(excelRow['DF_20G_'], 'number'),
-  dk_25ghz: safeValue(excelRow['DK_25G_'], 'number'),
-  df_25ghz: safeValue(excelRow['DF_25G_'], 'number'),
-  is_hf: normalizeIsHf(excelRow.IS_HF_),
-  data_source: safeValue(excelRow.DATA_SOURCE_),
-  filename: safeValue(excelRow.Filename)
-});
+    const mapExcelKeysToDbKeys = (excelRow) => ({
+      name: safeValue(excelRow.NAME),
+      request_date: safeValue(excelRow.REQUEST_DATE, 'date'),
+      handler: safeValue(excelRow.HANDLER),
+      status: safeValue(excelRow.STATUS) || 'Pending',
+      complete_date: safeValue(excelRow.COMPLETE_DATE, 'date'),
+      vendor: safeValue(excelRow.VENDOR),
+      family: safeValue(excelRow.FAMILY),
+      glass_style: safeValue(excelRow.GLASS_STYLE),
+      resin_percentage: safeValue(excelRow.RESIN_PERCENTAGE, 'number'),
+      rav_thickness: safeValue(excelRow.RAV_THICKNESS),
+      preference_class: safeValue(excelRow.PREFERENCE_CLASS_, 'number'),
+      use_type: safeValue(excelRow.H_USE_TYPE_),
+      pp_type: safeValue(excelRow.PP_TYPE_),
+      tg_min: safeValue(excelRow.TG_MIN, 'number'),
+      tg_max: safeValue(excelRow.TG_MAX, 'number'),
+      dk_01g: safeValue(excelRow.DK_01G_, 'number'),
+      df_01g: safeValue(excelRow.DF_01G_, 'number'),
+      dk_0_001ghz: safeValue(excelRow['DK_0_001GHz_'], 'number'),
+      df_0_001ghz: safeValue(excelRow['DF_0_001GHz_'], 'number'),
+      dk_0_01ghz: safeValue(excelRow['DK_0_01MHz_'], 'number'),
+      df_0_01ghz: safeValue(excelRow['DF_0_01GHz_'], 'number'),
+      dk_0_02ghz: safeValue(excelRow['DK_0_02MHz_'], 'number'),
+      df_0_02ghz: safeValue(excelRow['DF_0_02GHz_'], 'number'),
+      dk_2ghz: safeValue(excelRow['DK_2G_'], 'number'),
+      df_2ghz: safeValue(excelRow['DF_2G_'], 'number'),
+      dk_2_45ghz: safeValue(excelRow['DK_2.45G_'], 'number'),
+      df_2_45ghz: safeValue(excelRow['DF_2.45G_'], 'number'),
+      dk_3ghz: safeValue(excelRow['DK_3G_'], 'number'),
+      df_3ghz: safeValue(excelRow['DF_3G_'], 'number'),
+      dk_4ghz: safeValue(excelRow['DK_4G_'], 'number'),
+      df_4ghz: safeValue(excelRow['DF_4G_'], 'number'),
+      dk_5ghz: safeValue(excelRow['DK_5G_'], 'number'),
+      df_5ghz: safeValue(excelRow['DF_5G_'], 'number'),
+      dk_6ghz: safeValue(excelRow['DK_6G_'], 'number'),
+      df_6ghz: safeValue(excelRow['DF_6G_'], 'number'),
+      dk_7ghz: safeValue(excelRow['DK_7G_'], 'number'),
+      df_7ghz: safeValue(excelRow['DF_7G_'], 'number'),
+      dk_8ghz: safeValue(excelRow['DK_8G_'], 'number'),
+      df_8ghz: safeValue(excelRow['DF_8G_'], 'number'),
+      dk_9ghz: safeValue(excelRow['DK_9G_'], 'number'),
+      df_9ghz: safeValue(excelRow['DF_9G_'], 'number'),
+      dk_10ghz: safeValue(excelRow['DK_10G_'], 'number'),
+      df_10ghz: safeValue(excelRow['DF_10G_'], 'number'),
+      dk_15ghz: safeValue(excelRow['DK_15G_'], 'number'),
+      df_15ghz: safeValue(excelRow['DF_15G_'], 'number'),
+      dk_16ghz: safeValue(excelRow['DK_16G_'], 'number'),
+      df_16ghz: safeValue(excelRow['DF_16G_'], 'number'),
+      dk_20ghz: safeValue(excelRow['DK_20G_'], 'number'),
+      df_20ghz: safeValue(excelRow['DF_20G_'], 'number'),
+      dk_25ghz: safeValue(excelRow['DK_25G_'], 'number'),
+      df_25ghz: safeValue(excelRow['DF_25G_'], 'number'),
+      is_hf: normalizeIsHf(excelRow.IS_HF_),
+      data_source: safeValue(excelRow.DATA_SOURCE_),
+      filename: safeValue(excelRow.Filename)
+    });
 
 
     for (let i = 0; i < data.length; i++) {

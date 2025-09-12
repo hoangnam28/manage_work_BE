@@ -28,10 +28,10 @@ router.post('/add', async (req, res) => {
 
     const result = await connection.execute(
       `INSERT INTO document_columns (
-        column_id, stt, ma, khach_hang, ma_tai_lieu, doi_tuong,
+        column_id, stt, ma, khach_hang, ma_tai_lieu, doi_tuong,ky_han,
         created_by, created_at
       ) VALUES (
-        seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu, :doi_tuong,
+        seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu, :doi_tuong, :ky_han,
         :created_by, CURRENT_TIMESTAMP
       )`,
       { 
@@ -40,6 +40,7 @@ router.post('/add', async (req, res) => {
         khach_hang, 
         ma_tai_lieu,
         doi_tuong, 
+        ky_han,
         created_by
       },
       { autoCommit: true }
@@ -54,6 +55,7 @@ router.post('/add', async (req, res) => {
         khach_hang,
         ma_tai_lieu,
         doi_tuong,
+        ky_han,
         created_by
       }
     });

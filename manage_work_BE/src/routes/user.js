@@ -3,6 +3,7 @@ const router = express.Router();
 const oracledb = require('oracledb');
 const database = require('../config/database');
 const jwt = require('jsonwebtoken');
+const e = require('express');
 require('dotenv').config();
 
 // Middleware xác thực token
@@ -34,7 +35,13 @@ const checkAdminPermission = async (req, res, next) => {
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    if (result.rows.length === 0 || result.rows[0].ROLE !== 'admin') {
+    if (
+      result.rows.length === 0 ||
+      !String(result.rows[0].ROLE || '')
+        .split(',')
+        .map(r => r.trim().toLowerCase())
+        .includes('admin')
+    ) {
       return res.status(403).json({ message: 'Bạn không có quyền truy cập trang này' });
     }
     next();
@@ -85,7 +92,7 @@ router.get('/list', authenticateToken, checkAdminPermission, async (req, res) =>
 
 // Tạo user mới
 router.post('/create', authenticateToken, checkAdminPermission, async (req, res) => {
-  const { username, company_id, password_hash, department, role } = req.body;
+  const { username, company_id, password_hash, department, role, email } = req.body;
   let connection;
 
   try {
@@ -142,15 +149,16 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
 
     // Insert new user
     await connection.execute(
-      `INSERT INTO users (USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, DEPARTMENT, CREATED_AT, ROLE)
-       VALUES (:user_id, :username, :company_id, :password_hash, :department, SYSDATE, :role)`,
+      `INSERT INTO users (USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, DEPARTMENT, CREATED_AT, ROLE, EMAIL)
+       VALUES (:user_id, :username, :company_id, :password_hash, :department, SYSDATE, :role, :email)`,
       {
         user_id: nextId,
         username: username.trim(),
         company_id: company_id.trim(),
         password_hash: password_hash.trim(),
         department: department ? department.trim() : null,
-        role: roleStr
+        role: roleStr,
+        email: email.trim() || null,
       },
       { autoCommit: true }
     );
@@ -162,7 +170,8 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
         username: username.trim(),
         company_id: company_id.trim(),
         department: department,
-        role: roleStr
+        role: roleStr,
+        email: email
       }
     });
   } catch (error) {
@@ -182,13 +191,13 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
 // Cập nhật thông tin user
 router.put('/update/:userId', authenticateToken, checkAdminPermission, async (req, res) => {
   const { userId } = req.params;
-  const { username, password_hash, role } = req.body;
+  const { username, password_hash, role, email } = req.body;
   let connection;
 
   try {
     connection = await database.getConnection();
     const userExists = await connection.execute(
-      `SELECT USERNAME, PASSWORD_HASH, ROLE FROM users 
+      `SELECT USERNAME, PASSWORD_HASH, ROLE, EMAIL FROM users 
        WHERE USER_ID = :user_id AND IS_DELETED = 0`,
       { user_id: userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -251,6 +260,10 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
     if (roleStr !== undefined && roleStr !== userExists.rows[0].ROLE) {
       updateFields.push('ROLE = :role');
       bindParams.role = roleStr;
+    }
+    if (email !== undefined) {
+      updateFields.push('EMAIL = :email');
+      bindParams.email = email;
     }
 
     if (updateFields.length === 0) {

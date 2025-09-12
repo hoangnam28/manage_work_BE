@@ -3,52 +3,130 @@ const router = express.Router();
 const oracledb = require('oracledb');
 const database = require('../config/database');
 require('dotenv').config();
-const path = require('path');
-const fs = require('fs');
-const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
 
 const { addHistoryNewRecord } = require('./material-new-history');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, checkMaterialCorePermission } = require('../middleware/auth');
 
 const {
   generateCreateMaterialEmailHTML,
   generateStatusUpdateEmailHTML,
+  generateMaterialChangeEmailHTML,
   sendMailMaterialNew
 } = require('../helper/sendMailMaterialNew');
 
+
+const AllEmails = [
+  'trang.nguyenkieu@meiko-elec.com',
+  'thuy.nguyen2@meiko-elec.com'
+];
+
 // Lấy danh sách material core
-router.get('/list', authenticateToken, async (req, res) => {
+router.get('/list', authenticateToken, checkMaterialCorePermission(['view']), async (req, res) => {
   let connection;
   try {
+    const page = parseInt(req.query.page) || 1;
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const allowedPageSize = [10, 20, 50, 100];
+    const validPageSize = allowedPageSize.includes(pageSize) ? pageSize : 10;
+    const offset = (page - 1) * validPageSize;
+    const searchConditions = [];
+    const searchBindings = {};
+
+
+    Object.keys(req.query).forEach(key => {
+      const columnNames = ['VENDOR', 'FAMILY_CORE', 'FAMILY_PP', 'IS_HF'];
+      if (columnNames.includes(key.toUpperCase()) && req.query[key] && req.query[key].trim() !== '') {
+        const fieldName = key.toUpperCase();
+        const searchValue = req.query[key];
+        const paramName = `SEARCH_${fieldName}`;
+        searchConditions.push(`UPPER(${fieldName}) LIKE :${paramName}`);
+        searchBindings[paramName] = `%${searchValue.toUpperCase()}%`;
+      }
+
+      // Xử lý search_ prefix (backward compatibility)
+      if (key.startsWith('search_')) {
+        const fieldName = key.replace('search_', '').toUpperCase();
+        const searchValue = req.query[key];
+        if (searchValue && searchValue.trim() !== '') {
+          const paramName = `SEARCH_${fieldName}`;
+          searchConditions.push(`UPPER(${fieldName}) LIKE :${paramName}`);
+          searchBindings[paramName] = `%${searchValue.toUpperCase()}%`;
+        }
+      }
+    });
+
     connection = await database.getConnection();
-    const result = await connection.execute(`SELECT 
-        id,
-        requester_name,
-        request_date,
-        status,
-        vendor,
-        family_core,
-        family_pp,
-        is_hf,
-        material_type,
-        erp,
-        erp_pp,
-        erp_vendor,
-        is_caf,
-        tg,
-        bord_type,
-        plastic,
-        file_name,
-        data,
-        is_deleted
-       FROM material_new
-       WHERE is_deleted = 0
-       ORDER BY id DESC`,
-      {},
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
+
+    // Tạo WHERE clause với điều kiện tìm kiếm
+    const searchWhere = searchConditions.length > 0
+      ? `AND ${searchConditions.join(' AND ')}`
+      : '';
+
+    // Query để đếm tổng số records
+    const countQuery = `
+      SELECT COUNT(*) as total 
+      FROM material_new 
+      WHERE is_deleted = 0 ${searchWhere}
+    `;
+
+    // Xây dựng query chính với pagination
+    const mainQuery = `
+      SELECT * FROM (
+        SELECT a.*, ROW_NUMBER() OVER (ORDER BY id DESC) as row_num FROM (
+          SELECT
+            id,
+            requester_name,
+            request_date,
+            handler,
+            complete_date,
+            status,
+            vendor,
+            family_core,
+            family_pp,
+            is_hf,
+            material_type,
+            erp,
+            erp_pp,
+            erp_vendor,
+            is_caf,
+            tg,
+            bord_type,
+            plastic,
+            file_name,
+            data,
+            is_deleted
+          FROM material_new
+          WHERE is_deleted = 0
+          ${searchWhere}
+        ) a
+      ) WHERE row_num > :offset AND row_num <= :limit`;
+
+    // Chuẩn bị bind parameters cho cả search và pagination
+    const queryParams = {
+      offset: offset,
+      limit: offset + validPageSize,
+      ...searchBindings // Thêm các bind parameters cho điều kiện tìm kiếm
+    };
+
+    // Thực hiện cả 2 query song song với cùng một bộ params
+    const [countResult, dataResult] = await Promise.all([
+      connection.execute(countQuery, searchBindings, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
+      connection.execute(mainQuery, queryParams, { outFormat: oracledb.OUT_FORMAT_OBJECT })
+    ]);
+
+    const totalRecords = countResult.rows[0].TOTAL;
+    const totalPages = Math.ceil(totalRecords / validPageSize);
+
     res.json({
-      data: result.rows
+      data: dataResult.rows,
+      pagination: {
+        currentPage: page,
+        pageSize: validPageSize,
+        totalRecords: totalRecords,
+        totalPages: totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1
+      }
     });
   } catch (err) {
     console.error('Error in /list route:', err);
@@ -68,14 +146,26 @@ router.get('/list', authenticateToken, async (req, res) => {
 });
 
 // Thêm mới material core
-router.post('/create', authenticateToken, async (req, res) => {
+router.post('/create', authenticateToken, checkMaterialCorePermission(['create']), async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
     const data = req.body;
-
-    console.log('Received data:', data);
-
+    let creatorEmail = null;
+    if (req.user && req.user.email) {
+      try {
+        const userResult = await connection.execute(
+          'SELECT email FROM users WHERE user_id = :userId AND is_deleted =0',
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows && userResult.rows.length > 0) {
+          creatorEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (emailError) {
+        console.error('Warning: Failed to fetch creator email:', emailError);
+      }
+    }
     // Validate required fields
     const requiredFields = ['VENDOR', 'FAMILY_CORE', 'FAMILY_PP', 'IS_HF', 'IS_CAF'];
     const missingFields = requiredFields.filter(field => data[field] === undefined || data[field] === '');
@@ -85,7 +175,7 @@ router.post('/create', authenticateToken, async (req, res) => {
         message: `Missing required fields: ${missingFields.join(', ')}`
       });
     }
-
+    const createdRecords = [];
     // Get next ID using sequence
     const idResult = await connection.execute(
       `SELECT NVL(MAX(id), 0) + 1 AS nextId FROM material_new`,
@@ -118,8 +208,6 @@ router.post('/create', authenticateToken, async (req, res) => {
       is_deleted: 0,
     };
 
-    console.log('Prepared bind parameters:', bindParams);
-
     // Execute insert with proper error handling
     try {
       await connection.execute(
@@ -137,6 +225,7 @@ router.post('/create', authenticateToken, async (req, res) => {
         bindParams,
         { autoCommit: true }
       );
+
       try {
         await addHistoryNewRecord(connection, {
           materialNewId: nextId,
@@ -161,10 +250,8 @@ router.post('/create', authenticateToken, async (req, res) => {
         });
       } catch (historyError) {
         console.error('Warning: Failed to record history:', historyError);
-        // Continue execution even if history recording fails
       }
 
-      // Verify the insert by selecting the new record
       const verifyResult = await connection.execute(
         `SELECT * FROM material_new WHERE id = :id`,
         { id: nextId },
@@ -175,25 +262,61 @@ router.post('/create', authenticateToken, async (req, res) => {
         throw new Error('Record not found after insert');
       }
 
-      console.log('Insert successful, verified record:', verifyResult.rows[0]);
+      // ✅ SỬA: Thêm record vào createdRecords với đúng cấu trúc
+      const insertedRecord = verifyResult.rows[0];
+      createdRecords.push({
+        id: insertedRecord.ID,
+        VENDOR: insertedRecord.VENDOR,
+        FAMILY_CORE: insertedRecord.FAMILY_CORE,
+        FAMILY_PP: insertedRecord.FAMILY_PP,
+        IS_HF: insertedRecord.IS_HF,
+        MATERIAL_TYPE: insertedRecord.MATERIAL_TYPE,
+        ERP: insertedRecord.ERP,
+        ERP_PP: insertedRecord.ERP_PP,
+        ERP_VENDOR: insertedRecord.ERP_VENDOR,
+        IS_CAF: insertedRecord.IS_CAF,
+        TG: insertedRecord.TG,
+        BORD_TYPE: insertedRecord.BORD_TYPE,
+        PLASTIC: insertedRecord.PLASTIC,
+        FILE_NAME: insertedRecord.FILE_NAME,
+        DATA: insertedRecord.DATA
+      });
+
+      console.log('Insert successful, verified record:', insertedRecord);
 
       res.status(201).json({
         success: true,
         message: 'Thêm mới thành công',
-        data: verifyResult.rows[0]
+        data: insertedRecord
       });
+
       setImmediate(async () => {
         try {
-          const emailSubject = `[Material System] Tạo mới Material New - ${data.vendor || 'N/A'} | ${data.family_core || 'N/A'} | ${data.family_pp || 'N/A'}`;
-          const emailHTML = generateCreateMaterialEmailHTML(data, createdRecords);
+          const emailSubject = `[Material System] 📝Tạo mới Material New - ${insertedRecord.VENDOR || 'N/A'} | ${insertedRecord.FAMILY_CORE || 'N/A'} | ${insertedRecord.FAMILY_PP || 'N/A'}`;
 
-          await sendMailMaterialNew(emailSubject, emailHTML);
+          // Chuẩn bị dữ liệu cho email template với đúng key names
+          const emailData = {
+            REQUESTER_NAME: insertedRecord.REQUESTER_NAME,
+            REQUEST_DATE: insertedRecord.REQUEST_DATE,
+            STATUS: insertedRecord.STATUS,
+            VENDOR: insertedRecord.VENDOR,
+            FAMILY_CORE: insertedRecord.FAMILY_CORE,
+            FAMILY_PP: insertedRecord.FAMILY_PP
+          };
+
+          const emailHTML = generateCreateMaterialEmailHTML(emailData, createdRecords);
+          let recipients = [...AllEmails];
+          if (creatorEmail && !recipients.includes(creatorEmail)) {
+            recipients.push(creatorEmail);
+          }
+          recipients = [...new Set(recipients)];
+          await sendMailMaterialNew(emailSubject, emailHTML, recipients);
           console.log('Email notification sent successfully for new material creation');
         } catch (emailError) {
           console.error('Warning: Failed to send email notification:', emailError);
-          // Email fail không ảnh hưởng gì vì đã trả response thành công
         }
       });
+
     } catch (insertError) {
       console.error('Error during insert:', insertError);
       throw new Error(`Failed to insert record: ${insertError.message}`);
@@ -218,12 +341,34 @@ router.post('/create', authenticateToken, async (req, res) => {
   }
 });
 
-// Cập nhật material core
 router.put('/update/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
   let connection;
-
+  const isStatusUpdate = updateData.status && Object.keys(updateData).length <= 3;
+  if (isStatusUpdate) {
+    // Chỉ admin mới có thể approve/cancel
+    const hasApprovePermission = checkMaterialCorePermission(['approve']);
+    try {
+      hasApprovePermission(req, res, () => { }); // Test permission
+    } catch (error) {
+      return res.status(403).json({
+        message: 'Chỉ Admin mới có quyền Approve/Cancel',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+    }
+  } else {
+    // Cập nhật thông tin khác - admin và edit
+    const hasEditPermission = checkMaterialCorePermission(['edit']);
+    try {
+      hasEditPermission(req, res, () => { }); // Test permission
+    } catch (error) {
+      return res.status(403).json({
+        message: 'Bạn không có quyền chỉnh sửa',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+    }
+  }
   try {
     if (!id) {
       return res.status(400).json({
@@ -232,6 +377,21 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     }
 
     connection = await database.getConnection();
+    let creatorEmail = null;
+    if (req.user && req.user.userId) {
+      try {
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          creatorEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (userError) {
+        console.error('Error fetching user email:', userError);
+      }
+    }
 
     // Chuyển đổi tên trường từ UPPERCASE sang lowercase để khớp với mapping
     const normalizedUpdateData = {};
@@ -239,9 +399,6 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       const lowerKey = key.toLowerCase();
       normalizedUpdateData[lowerKey] = updateData[key];
     });
-
-    console.log('Original updateData:', updateData);
-    console.log('Normalized updateData:', normalizedUpdateData);
 
     // Validation với tên trường đã normalize
     if (normalizedUpdateData.status && !['Approve', 'Cancel', 'Pending'].includes(normalizedUpdateData.status)) {
@@ -257,19 +414,33 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'Giá trị is_caf không hợp lệ' });
     }
 
+    // Lấy dữ liệu của bản ghi cũ trước khi cập nhật
     let oldStatus = null;
-    let oldRecord = null;
-    if (updateData.status) {
+    let oldRecordData = null;
+
+    try {
       const oldResult = await connection.execute(
-        `SELECT status, vendor, family, name FROM material_properties WHERE id = :id`,
+        `SELECT * FROM material_new WHERE id = :id`,
         { id },
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
 
       if (oldResult.rows.length > 0) {
-        oldRecord = oldResult.rows[0];
-        oldStatus = oldRecord.STATUS;
+        oldRecord = oldResult;
+        oldRecordData = oldResult.rows[0];
+        oldStatus = oldRecordData.STATUS;
+      } else {
+        return res.status(404).json({
+          message: 'Không tìm thấy bản ghi',
+          details: `Không tìm thấy bản ghi với ID: ${id}`
+        });
       }
+    } catch (error) {
+      console.error('Error fetching old record:', error);
+      return res.status(500).json({
+        message: 'Lỗi khi lấy thông tin bản ghi cũ',
+        error: error.message
+      });
     }
     const updateFields = [];
     const bindParams = { id };
@@ -295,6 +466,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       file_name: 'file_name',
       data: 'data',
       is_deleted: 'is_deleted',
+      handler: 'handler',
+      complete_date: 'complete_date'
     };
 
     const safeNumber = (value, precision = null) => {
@@ -326,9 +499,6 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       }
     });
 
-    console.log('Update fields:', updateFields);
-    console.log('Bind params:', bindParams);
-
     if (updateFields.length === 0) {
       return res.status(400).json({
         message: 'Không có dữ liệu cập nhật',
@@ -345,13 +515,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       SET ${updateFields.join(', ')}
       WHERE id = :id
     `;
-
-    console.log('Final update query:', updateQuery);
-
     const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
-
-    console.log('Update result:', result);
-
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
@@ -362,9 +526,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    // ✅ SỬA: Kiểm tra và gửi email khi trạng thái thay đổi
     if (updateData.status && oldStatus && updateData.status !== oldStatus) {
-      // ✅ Sử dụng setImmediate để gửi email sau khi response đã được gửi
       setImmediate(async () => {
         try {
           const materialInfo = updatedRecord.rows[0];
@@ -372,21 +534,25 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
           // Chỉ gửi email khi chuyển từ Pending sang Approve hoặc Cancel
           if (oldStatus === 'Pending' && (newStatus === 'Approve' || newStatus === 'Cancel')) {
-            const emailSubject = `[Material System] Material New được cập nhật - ID: ${id}`;
+            const emailSubject = `[Material System] ✅ Material New được cập nhật - ID: ${id}`;
             const emailHTML = generateStatusUpdateEmailHTML(
               id,
-              oldStatus,
               newStatus,
               req.user.username,
               {
                 vendor: materialInfo.VENDOR,
                 family_core: materialInfo.FAMILY_CORE,
                 family_pp: materialInfo.FAMILY_PP,
-                name: materialInfo.NAME
+                requester_name: materialInfo.REQUESTER_NAME
               }
             );
-
-            await sendMailMaterialPP(emailSubject, emailHTML);
+            let recipients = [...AllEmails];
+            if (creatorEmail && !recipients.includes(creatorEmail)) {
+              recipients.push(creatorEmail);
+            }
+            recipients = [...new Set(recipients)];
+            // ✅ SỬA: Gọi đúng function sendMailMaterialNew thay vì sendMailMaterialPP
+            await sendMailMaterialNew(emailSubject, emailHTML), recipients;
             console.log(`✅ Email notification sent for status change: ${oldStatus} -> ${newStatus}`);
           }
         } catch (emailError) {
@@ -401,9 +567,98 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       data: updateData,
       createdBy: req.user.username
     });
+    if (oldStatus === 'Approve') {
+      setImmediate(async () => {
+        try {
+          // So sánh các giá trị để tìm ra thay đổi
+          const changes = [];
+          const fieldLabels = {
+            requester_name: 'Người yêu cầu',
+            request_date: 'Ngày yêu cầu',
+            handler: 'Người xử lý',
+            vendor: 'Vendor',
+            family_core: 'Family Core',
+            family_pp: 'Family PP',
+            is_hf: 'Is HF',
+            material_type: 'Material Type',
+            erp: 'ERP',
+            erp_pp: 'ERP PP',
+            erp_vendor: 'ERP Vendor',
+            is_caf: 'IS CAF',
+            tg: 'TG',
+            bord_type: 'BORD Type',
+            plastic: 'Plastic',
+            file_name: 'File name',
+            data: 'Data Source',
+          };
 
+          Object.keys(normalizedUpdateData).forEach(key => {
+            if (key !== 'status' && columnMapping[key]) {
+              const dbColumnName = columnMapping[key].toUpperCase();
+              const oldValue = oldRecordData[dbColumnName];
+              const newValue = normalizedUpdateData[key];
+              const isChanged = () => {
+                const normalizeValue = (val) => {
+                  if (val === null || val === undefined || val === '') return null;
+                  return String(val).trim();
+                };
 
+                const normalizedOld = normalizeValue(oldValue);
+                const normalizedNew = normalizeValue(newValue);
 
+                return normalizedOld !== normalizedNew;
+              };
+
+              if (isChanged()) {
+                changes.push({
+                  field: fieldLabels[key] || key,
+                  fieldKey: key,
+                  oldValue: oldValue || 'Không có',
+                  newValue: newValue || 'Không có'
+                });
+              }
+            }
+          });
+          if (changes.length > 0) {
+            console.log(`✅ Sending email for ${changes.length} changes in approved material ID: ${id}`);
+
+            const emailSubject = `[Material System] ⚠️ Thay đổi dữ liệu Material Core đã được Approve - ID: ${id}`;
+            const emailHTML = generateMaterialChangeEmailHTML(
+              id,
+              changes,
+              req.user?.username || 'System',
+              {
+                vendor: oldRecordData.VENDOR,
+                family_core: oldRecordData.FAMILY_CORE,
+                family_pp: oldRecordData.FAMILY_PP,
+                material_type: oldRecordData.MATERIAL_TYPE,
+              }
+            );
+              let recipients = [...AllEmails];
+          if (creatorEmail && !recipients.includes(creatorEmail)) {
+            recipients.push(creatorEmail);
+          }
+          recipients = [...new Set(recipients)];
+
+            await sendMailMaterialNew(emailSubject, emailHTML, recipients);
+            console.log(`✅ Email sent successfully for material changes in approved record (ID: ${id})`);
+          } else {
+            console.log(`ℹ️ No significant changes detected for approved material ID: ${id}`);
+          }
+
+        } catch (emailError) {
+          console.error('❌ Failed to send material change email:', emailError);
+          // ✅ THÊM CHI TIẾT ERROR
+          console.error('Error details:', {
+            materialId: id,
+            oldStatus: oldStatus,
+            updateData: normalizedUpdateData,
+            errorMessage: emailError.message,
+            errorStack: emailError.stack
+          });
+        }
+      });
+    }
     res.json({
       message: 'Cập nhật thành công',
       data: updatedRecord.rows[0]
@@ -426,7 +681,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     }
   }
 });
-router.delete('/delete/:id', authenticateToken, async (req, res) => {
+router.delete('/delete/:id', authenticateToken, checkMaterialCorePermission(['delete']), async (req, res) => {
   let { id } = req.params;
   let connection;
   try {
@@ -480,104 +735,7 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
   }
 });
 
-function numberToColumnName(num) {
-  let result = '';
-  while (num > 0) {
-    num--;
-    result = String.fromCharCode(65 + (num % 26)) + result;
-    num = Math.floor(num / 26);
-  }
-  return result;
-}
-
-function cloneFileSync(src, dest) {
-  fs.copyFileSync(src, dest);
-}
-
-router.post('/export-xlsm', async (req, res) => {
-  try {
-    const data = req.body.data;
-    if (!data || !Array.isArray(data)) {
-      return res.status(400).json({ message: 'Invalid data format' });
-    }
-
-    const templatePath = path.join(__dirname, '../public/template/TemplateMaterial.xlsm');
-    if (!fs.existsSync(templatePath)) {
-      return res.status(404).json({ message: 'Template file not found' });
-    }
-
-    const tempName = `MaterialPPExport_${Date.now()}.xlsm`;
-    const tempPath = path.join(__dirname, `../public/template/${tempName}`);
-    cloneFileSync(templatePath, tempPath);
-
-    const workbook = XLSX.readFile(tempPath, { type: 'binary', bookVBA: true });
-
-    const sheetName = workbook.SheetNames[7];
-    if (!sheetName) {
-      fs.unlinkSync(tempPath);
-      return res.status(500).json({ message: 'Sheet 7 not found in template' });
-    }
-
-    const ws = workbook.Sheets[sheetName];
-
-    const map = [
-      'VENDOR', 'FAMILY', 'GLASS_STYLE', 'RESIN_PERCENTAGE', null, null,
-      'PREFERENCE_CLASS', 'USE_TYPE', 'PP_TYPE',
-      'TG_MIN', 'TG_MAX', 'CENTER_GLASS', null, null, 'DK_01G', 'DF_01G', 'DK_0_001GHZ', 'DF_0_001GHZ', 'DK_0_01GHZ', 'DF_0_01GHZ',
-      'DK_0_02GHZ', 'DF_0_02GHZ', 'DK_2GHZ', 'DF_2GHZ', 'DK_2_45GHZ', 'DF_2_45GHZ',
-      'DK_3GHZ', 'DF_3GHZ', 'DK_4GHZ', 'DF_4GHZ', 'DK_5GHZ', 'DF_5GHZ',
-      'DK_6GHZ', 'DF_6GHZ', 'DK_7GHZ', 'DF_7GHZ',
-      'DK_8GHZ', 'DF_8GHZ', 'DK_9GHZ', 'DF_9GHZ', 'DK_10GHZ', 'DF_10GHZ', 'DK_15GHZ', 'DF_15GHZ',
-      'DK_16GHZ', 'DF_16GHZ', 'DK_20GHZ', 'DF_20GHZ', 'DK_25GHZ', 'DF_25GHZ',
-      'DK_30GHZ', 'DF_30GHZ', 'DK_35GHZ__', 'DF_35GHZ__', 'DK_40GHZ', 'DF_40GHZ',
-      'DK_45GHZ', 'DF_45GHZ', 'DK_50GHZ', 'DF_50GHZ', 'DK_55GHZ', 'DF_55GHZ',
-      'IS_HF', 'DATA_SOURCE'
-    ];
-
-    data.forEach((row, idx) => {
-      const excelRow = idx + 3;
-      let colIndex = 6;
-
-      for (let i = 0; i < map.length; i++) {
-        if (!map[i]) {
-          colIndex++;
-          continue;
-        }
-        const col = numberToColumnName(colIndex);
-        const cell = `${col}${excelRow}`;
-        let value = row[map[i]] ?? row[map[i]?.toLowerCase()] ?? '';
-        ws[cell] = { t: 's', v: String(value) };
-        colIndex++;
-      }
-    });
-
-    XLSX.writeFile(workbook, tempPath, { bookType: 'xlsm', bookVBA: true });
-
-    res.setHeader('Content-Disposition', `attachment; filename=MaterialCoreExport.xlsm`);
-    res.setHeader('Content-Type', 'application/vnd.ms-excel.sheet.macroEnabled.12');
-
-    const fileBuffer = fs.readFileSync(tempPath);
-    res.end(fileBuffer);
-
-    setTimeout(() => {
-      try {
-        fs.unlinkSync(tempPath);
-      } catch (cleanupError) {
-        console.warn('Could not cleanup temp file:', cleanupError.message);
-      }
-    }, 10000);
-
-  } catch (err) {
-    console.error('Export-xlsm error:', err);
-    res.status(500).json({
-      message: 'Export-xlsm failed',
-      error: err.message,
-      suggestion: 'Kiểm tra template file và định dạng dữ liệu input'
-    });
-  }
-});
-
-router.post('/import-material-new', async (req, res) => {
+router.post('/import-material-new', checkMaterialCorePermission(['create']), async (req, res) => {
   let connection;
 
   try {

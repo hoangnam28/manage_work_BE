@@ -15,7 +15,6 @@ const refreshAccessToken = (refreshToken) => {
     const refreshSecret = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
     const decoded = jwt.verify(refreshToken, refreshSecret);
 
-    // Kiểm tra xem token có gần hết hạn không (còn ít hơn 7 ngày)
     const currentTime = Math.floor(Date.now() / 1000);
     const timeUntilExpiry = decoded.exp - currentTime;
     const sevenDaysInSeconds = 7 * 24 * 60 * 60;
@@ -87,7 +86,6 @@ const authenticateToken = (req, res, next) => {
 };
 
 const checkEditPermission = async (req, res, next) => {
-  // Kiểm tra xem req.user có tồn tại không
   if (!req.user) {
     return res.status(401).json({ 
       message: 'Vui lòng đăng nhập lại',
@@ -165,11 +163,74 @@ const handleRefreshToken = async (req, res) => {
     });
   }
 };
+const checkMaterialCorePermission = (requiredActions = []) => {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ 
+        message: 'Vui lòng đăng nhập lại',
+        code: 'USER_NOT_AUTHENTICATED'
+      });
+    }
+
+    // Chuyển đổi role thành mảng nếu là string
+    let userRoles = [];
+    if (typeof req.user.role === 'string' && req.user.role.includes(',')) {
+      userRoles = req.user.role.split(',').map(r => r.trim());
+    } else if (Array.isArray(req.user.roles)) {
+      userRoles = req.user.roles;
+    } else if (req.user.role) {
+      userRoles = [req.user.role];
+    }
+
+    // Định nghĩa quyền cho từng role
+    const rolePermissions = {
+      'admin': ['view', 'create', 'edit', 'delete', 'approve', 'cancel'],
+      'editor': ['view', 'create', 'edit', 'delete'],
+      'viewer': ['view'],
+    };
+
+    // Gộp quyền từ tất cả roles mà user có
+    const userPermissions = userRoles.reduce((perms, role) => {
+      const rolePerms = rolePermissions[role.toLowerCase()] || [];
+      return perms.concat(rolePerms);
+    }, []);
+
+    // Loại bỏ quyền trùng lặp và chuyển về lowercase để so sánh
+    const uniquePermissions = [...new Set(userPermissions)].map(p => p.toLowerCase());
+    const requiredActionsLower = requiredActions.map(a => a.toLowerCase());
+
+    // Check xem user có đủ các requiredActions không
+    const hasPermission = requiredActionsLower.every(action =>
+      uniquePermissions.includes(action)
+    );
+
+    if (!hasPermission) {
+      console.log('Permission check failed:', {
+        user: req.user.username,
+        roles: userRoles,
+        requiredActions: requiredActions,
+        userPermissions: uniquePermissions
+      });
+      
+      return res.status(403).json({ 
+        message: 'Bạn không có quyền thực hiện thao tác này',
+        code: 'INSUFFICIENT_PERMISSIONS',
+        requiredActions,
+        userRoles,
+        userPermissions: uniquePermissions
+      });
+    }
+
+    next();
+  };
+};
+
 
 module.exports = {
   authenticateToken,
   checkEditPermission,
   checkRole,
+  checkMaterialCorePermission, 
   generateAccessToken,
   generateRefreshToken,
   refreshAccessToken,

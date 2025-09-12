@@ -57,17 +57,20 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
+    const whereCondition = `(IS_DELETED = 0 OR IS_DELETED IS NULL)
+  AND (IMP_1 IS NULL OR (IMP_1 LIKE '%-0000' AND IMP_1 NOT LIKE '%VPW%'))
+`;
 
-    // Lấy tổng số bản ghi
+    // Lấy tổng số bản ghi với điều kiện lọc
     const countResult = await connection.execute(
-      `SELECT COUNT(*) as total FROM impedances WHERE IS_DELETED = 0 OR IS_DELETED IS NULL`,
+      `SELECT COUNT(*) as total FROM impedances WHERE ${whereCondition}`,
       {},
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
     const total = countResult.rows[0].TOTAL;
 
-    // Lấy dữ liệu với phân trang
+    // Lấy dữ liệu với phân trang và điều kiện lọc
     const result = await connection.execute(
       `SELECT IMP_ID as imp_id,
        IMP_1, IMP_2, IMP_3, IMP_4, IMP_5, IMP_6, IMP_7, IMP_8, IMP_9,
@@ -87,15 +90,15 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
        IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
        IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
        IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
-       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136, IMP_137,
+       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136, IMP_137, IMP_138,
        NOTE as note
        FROM impedances
-       WHERE IS_DELETED = 0 OR IS_DELETED IS NULL
+       WHERE ${whereCondition}
        ORDER BY IMP_ID DESC`,
       {},
       {
         outFormat: oracledb.OUT_FORMAT_OBJECT,
-        maxRows: 1000 // Tăng giới hạn số hàng tối đa
+        maxRows: 5000 // Tăng giới hạn số hàng tối đa
       }
     );
 
@@ -145,7 +148,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
     let placeholders = [':imp_id'];
 
     // Process all possible impedance fields
-    for (let i = 1; i <= 136; i++) {
+    for (let i = 1; i <= 138; i++) {
       const reqField = `imp_${i}`;
       const dbField = `IMP_${i}`;
 
@@ -190,7 +193,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
        IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
        IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
        IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
-       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136, IMP_137,
+       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136, IMP_137, IMP_138,
        NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
@@ -204,7 +207,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
 
     // Add lowercase versions for compatibility
     const responseData = newRecord.rows[0];
-    for (let i = 1; i <= 136; i++) {
+    for (let i = 1; i <= 138; i++) {
       const upperField = `IMP_${i}`;
       const lowerField = `imp_${i}`;
       if (responseData[upperField]) {
@@ -386,7 +389,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
        IMP_112, IMP_113, IMP_114, IMP_115, IMP_116, IMP_117, IMP_118,
        IMP_119, IMP_120, IMP_121, IMP_122, IMP_123, IMP_124, IMP_125,
        IMP_126, IMP_127, IMP_128, IMP_129, IMP_130, IMP_131, IMP_132,
-       IMP_133, IMP_134, IMP_135, IMP_136, IMP_137,
+       IMP_133, IMP_134, IMP_135, IMP_136, IMP_137, IMP_138,
        NOTE AS note
        FROM impedances
        WHERE IMP_ID = :imp_id`,
@@ -569,7 +572,7 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
       let placeholders = [':imp_id'];
 
       try {
-        for (let i = 1; i <= 136; i++) {
+        for (let i = 1; i <= 138; i++) {
           const key = `IMP_${i}`;
           let value = record[key];
 

@@ -6,54 +6,73 @@ const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
-const XLSX = require('xlsx'); // Thêm thư viện xlsx để thao tác file .xlsm
-
-const { 
-    generateCreateMaterialEmailHTML, 
-    generateStatusUpdateEmailHTML, 
-    sendMailMaterialCore
+const XLSX = require('xlsx');
+const {
+  generateCreateMaterialEmailHTML,
+  generateStatusUpdateEmailHTML,
+  generateMaterialChangeEmailHTML,
+  sendMailMaterialCore
 } = require('../helper/sendMailMaterialCore');
 
-const { authenticateToken } = require('../middleware/auth');
+const {
+  authenticateToken,
+  checkMaterialCorePermission
+} = require('../middleware/auth');
 const { addHistoryRecord } = require('./material-core-history');
 
-async function getOldStatusBeforeUpdate(connection, materialId) {
-  try {
-    const result = await connection.execute(
-      `SELECT status FROM material_core WHERE id = :id`,
-      { id: materialId },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
-    
-    return result.rows.length > 0 ? result.rows[0].STATUS : null;
-  } catch (error) {
-    console.error('Error getting old status:', error);
-    return null;
-  }
-}
+
+const AllEmails = [
+  'trang.nguyenkieu@meiko-elec.com',
+  'thuy.nguyen2@meiko-elec.com'
+];
+
 
 // Lấy danh sách material core
-router.get('/list', authenticateToken, async (req, res) => {
+router.get('/list', authenticateToken, checkMaterialCorePermission(['view']), async (req, res) => {
   let connection;
   try {
-    // Lấy parameters từ query string
     const page = parseInt(req.query.page) || 1;
-    const pageSize = parseInt(req.query.pageSize) || 100;
-    const search = req.query.search || '';
-    
-    // Tính offset
-    const offset = (page - 1) * pageSize;
-    
+    const pageSize = parseInt(req.query.pageSize) || 10;
+    const allowedPageSize = [10, 20, 50, 100];
+    const validPageSize = allowedPageSize.includes(pageSize) ? pageSize : 10;
+    const offset = (page - 1) * validPageSize;
+    const searchConditions = [];
+    const searchBindings = {};
+
+
+    Object.keys(req.query).forEach(key => {
+      const stringColumns = ['FAMILY', 'CENTER_GLASS']; // cột text
+      const numberColumns = ['NOMINAL_THICKNESS', 'SPEC_THICKNESS', 'TOP_FOIL_CU_WEIGHT', 'BOT_FOIL_CU_WEIGHT']; // cột số
+      const searchValue = req.query[key];
+      if (searchValue && searchValue.trim() !== '') {
+        const fieldName = key.toUpperCase();
+        const paramName = `SEARCH_${fieldName}`;
+
+        if (stringColumns.includes(fieldName)) {
+          // Tìm kiếm LIKE cho text
+          searchConditions.push(`UPPER(${fieldName}) LIKE :${paramName}`);
+          searchBindings[paramName] = `%${searchValue.toUpperCase()}%`;
+        } else if (numberColumns.includes(fieldName)) {
+          // Tìm kiếm chính xác hoặc khoảng cho số
+          searchConditions.push(`${fieldName} = :${paramName}`);
+          searchBindings[paramName] = parseFloat(searchValue);
+        }
+      }
+    });
+
     connection = await database.getConnection();
-    
+    // Tạo WHERE clause với điều kiện tìm kiếm
+    const searchWhere = searchConditions.length > 0
+      ? `AND ${searchConditions.join(' AND ')}`
+      : '';
+
     // Query để đếm tổng số records
-    let countQuery = `
+    const countQuery = `
       SELECT COUNT(*) as total 
-      FROM material_core 
-      WHERE is_deleted = 0
+      FROM material_core
+      WHERE is_deleted = 0 ${searchWhere}
     `;
-    
-    // Query chính với pagination sử dụng ROW_NUMBER()
+
     let mainQuery = `
       SELECT * FROM (
         SELECT a.*, ROW_NUMBER() OVER (ORDER BY id DESC) as rn FROM (
@@ -129,50 +148,28 @@ router.get('/list', authenticateToken, async (req, res) => {
             data_source,
             filename
           FROM material_core 
-          WHERE is_deleted = 0
-    `;
-    
-    // Thêm điều kiện search nếu có
-    const bindParams = {};
-    if (search) {
-      mainQuery += ` AND (
-        UPPER(requester_name) LIKE UPPER(:search) OR
-        UPPER(vendor) LIKE UPPER(:search) OR
-        UPPER(family) LIKE UPPER(:search) OR
-        UPPER(handler) LIKE UPPER(:search)
-      )`;
-      countQuery += ` AND (
-        UPPER(requester_name) LIKE UPPER(:search) OR
-        UPPER(vendor) LIKE UPPER(:search) OR
-        UPPER(family) LIKE UPPER(:search) OR
-        UPPER(handler) LIKE UPPER(:search)
-      )`;
-      bindParams.search = `%${search}%`;
-    }
-    
-    // Hoàn thiện query với pagination
-    mainQuery += `
+          WHERE is_deleted = 0 ${searchWhere}
         ) a
       ) 
       WHERE rn > :offset AND rn <= :limit`;
-    
-    bindParams.offset = offset;
-    bindParams.limit = offset + pageSize;
-    
-    // Thực hiện cả 2 query song song
+    const bindParams = {
+      offset: offset,
+      limit: offset + validPageSize,
+      ...searchBindings
+    };
     const [countResult, dataResult] = await Promise.all([
-      connection.execute(countQuery, search ? { search: bindParams.search } : {}, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
+      connection.execute(countQuery, searchBindings, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
       connection.execute(mainQuery, bindParams, { outFormat: oracledb.OUT_FORMAT_OBJECT })
     ]);
-    
+
     const totalRecords = countResult.rows[0].TOTAL;
-    const totalPages = Math.ceil(totalRecords / pageSize);
-    
+    const totalPages = Math.ceil(totalRecords / validPageSize);
+
     res.json({
       data: dataResult.rows,
       pagination: {
         currentPage: page,
-        pageSize: pageSize,
+        pageSize: validPageSize,
         totalRecords: totalRecords,
         totalPages: totalPages,
         hasNextPage: page < totalPages,
@@ -300,7 +297,7 @@ router.get('/all', authenticateToken, async (req, res) => {
 
 
 // Thêm mới material core
-router.post('/create', authenticateToken, async (req, res) => {
+router.post('/create', authenticateToken, checkMaterialCorePermission(['create']), async (req, res) => {
   let connection;
   try {
     const data = req.body;
@@ -309,7 +306,7 @@ router.post('/create', authenticateToken, async (req, res) => {
     let botArr = Array.isArray(data.bot_foil_cu_weight) ? data.bot_foil_cu_weight : [data.bot_foil_cu_weight];
     topArr = topArr.filter(x => x !== undefined && x !== null && x !== '');
     botArr = botArr.filter(x => x !== undefined && x !== null && x !== '');
-    
+
     if (topArr.length !== botArr.length) {
       return res.status(400).json({
         success: false,
@@ -317,7 +314,22 @@ router.post('/create', authenticateToken, async (req, res) => {
       });
     }
     connection = await database.getConnection();
-    
+    let creatorEmail = null;
+    if (req.user && req.user.userId) {
+      try {
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          creatorEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (userError) {
+        console.error('Error fetching user email:', userError);
+      }
+    }
+
     const createdRecords = [];
     for (let i = 0; i < topArr.length; i++) {
       // Get next ID from sequence
@@ -325,7 +337,7 @@ router.post('/create', authenticateToken, async (req, res) => {
         `SELECT material_core_seq.NEXTVAL FROM DUAL`
       );
       const nextId = result.rows[0][0];
-      
+
       const bindParams = {
         id: nextId,
         requester_name: data.requester_name,
@@ -399,7 +411,7 @@ router.post('/create', authenticateToken, async (req, res) => {
         filename: data.filename,
         is_deleted: 0,
       };
-      
+
       await connection.execute(
         `INSERT INTO material_core (
           id, requester_name, request_date, handler, 
@@ -465,9 +477,9 @@ router.post('/create', authenticateToken, async (req, res) => {
           :is_hf, :data_source, :filename, :is_deleted
         )`,
         bindParams,
-        { autoCommit: true } // ✅ Đổi thành false để có thể commit sau
+        { autoCommit: true } 
       );
-      
+
       // Lưu lịch sử
       try {
         await addHistoryRecord(connection, {
@@ -552,7 +564,7 @@ router.post('/create', authenticateToken, async (req, res) => {
       });
     }
     await connection.commit();
-    
+
     res.status(201).json({
       success: true,
       message: 'Material core(s) created successfully',
@@ -565,15 +577,20 @@ router.post('/create', authenticateToken, async (req, res) => {
       try {
         const emailSubject = `[Material System] Tạo mới Material Core - ${data.vendor || 'N/A'} | ${data.family || 'N/A'}`;
         const emailHTML = generateCreateMaterialEmailHTML(data, createdRecords);
-        
-        await sendMailMaterialCore(emailSubject, emailHTML);
+        let recipients = [...AllEmails];
+        if (creatorEmail && !recipients.includes(creatorEmail)) {
+          recipients.push(creatorEmail);
+        }
+        recipients = [...new Set(recipients)];
+
+        await sendMailMaterialCore(emailSubject, emailHTML, recipients);
         console.log('Email notification sent successfully for new material creation');
       } catch (emailError) {
         console.error('Warning: Failed to send email notification:', emailError);
         // Email fail không ảnh hưởng gì vì đã trả response thành công
       }
     });
-    
+
   } catch (error) {
     console.error('Error creating material core:', error);
     if (connection) {
@@ -598,12 +615,42 @@ router.post('/create', authenticateToken, async (req, res) => {
     }
   }
 });
+
+
 router.put('/update/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
   let connection;
+  const isStatusUpdate = updateData.status && Object.keys(updateData).length <= 3;
+
+  if (isStatusUpdate) {
+    // Chỉ admin mới có thể approve/cancel
+    const hasApprovePermission = checkMaterialCorePermission(['approve']);
+    try {
+      hasApprovePermission(req, res, () => { }); // Test permission
+    } catch (error) {
+      return res.status(403).json({
+        message: 'Chỉ Admin mới có quyền Approve/Cancel',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+    }
+  } else {
+    // Cập nhật thông tin khác - admin và edit
+    const hasEditPermission = checkMaterialCorePermission(['edit']);
+    try {
+      hasEditPermission(req, res, () => { }); // Test permission
+    } catch (error) {
+      return res.status(403).json({
+        message: 'Bạn không có quyền chỉnh sửa',
+        code: 'INSUFFICIENT_PERMISSIONS'
+      });
+    }
+  }
+
+  const isOnlyStatusUpdate = updateData.status && Object.keys(updateData).length === 1;
 
   try {
+    // Verify that id exists
     if (!id) {
       return res.status(400).json({
         message: 'ID không hợp lệ'
@@ -611,12 +658,42 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     }
 
     connection = await database.getConnection();
-    const oldStatus = await getOldStatusBeforeUpdate(connection, id);
-
-    if (updateData.status && !['Approve', 'Cancel', 'Pending'].includes(updateData.status)) {
-      return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
+    let creatorEmail = null;
+    if (req.user && req.user.userId) {
+      try {
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          creatorEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (userError) {
+        console.error('Error fetching user email:', userError);
+      }
     }
-    
+
+    // ALWAYS fetch old record data before updating
+    const oldRecord = await connection.execute(
+      `SELECT * FROM material_core WHERE id = :id`,
+      { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (oldRecord.rows.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
+    }
+
+    const oldStatus = oldRecord.rows[0].STATUS;
+    const oldRecordData = oldRecord.rows[0];
+
+    if (updateData.status) {
+      if (!['Approve', 'Cancel', 'Pending'].includes(updateData.status)) {
+        return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
+      }
+    }
+
     if (updateData.top_foil_cu_weight) {
       if (Array.isArray(updateData.top_foil_cu_weight)) {
         updateData.top_foil_cu_weight = updateData.top_foil_cu_weight[0];
@@ -630,7 +707,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     if (updateData.is_hf && !['TRUE', 'FALSE'].includes(updateData.is_hf)) {
       return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
     }
-    
+
     const updateFields = [];
     const bindParams = { id };
     const columnMapping = {
@@ -769,67 +846,204 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       SET ${updateFields.join(', ')}
       WHERE id = :id
     `;
-    
+
     const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
 
     if (result.rowsAffected === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
-    
+
     const updatedRecord = await connection.execute(
       `SELECT * FROM material_core WHERE id = :id`,
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    // KIỂM TRA VÀ GỬI EMAIL KHI TRẠNG THÁI THAY ĐỔI
-    if (updateData.status && oldStatus && updateData.status !== oldStatus) {
-      try {
-        // Lấy thông tin material để gửi email
-        const materialInfo = updatedRecord.rows[0];
-        const newStatus = updateData.status;
-        
-        // Chỉ gửi email khi chuyển từ Pending sang Approve
-        if (oldStatus === 'Pending' && newStatus === 'Approve') {
-          const emailSubject = `[Material System] Material Core được cập nhật - ID: ${id}`;
+    // IMPROVED EMAIL LOGIC - Send email for ANY status change
+    if (updateData.status && oldStatus !== updateData.status) {
+      // Use setImmediate to send email asynchronously after response
+      setImmediate(async () => {
+        try {
+          const materialInfo = updatedRecord.rows[0];
+          const newStatus = updateData.status;
+
+          console.log(`Status changed from ${oldStatus} to ${newStatus} for ID: ${id}`);
+
+          const emailSubject = `[Material System] ✅ Đã cập nhật trạng thái Material Core ${materialInfo.VENDOR} `;
           const emailHTML = generateStatusUpdateEmailHTML(
-            id, 
-            oldStatus, 
-            newStatus, 
-            req.user.username,
+            id,
+            oldStatus,
+            newStatus,
+            req.user?.username || 'System',
             {
               vendor: materialInfo.VENDOR,
               family: materialInfo.FAMILY,
-              requester_name: materialInfo.REQUESTER_NAME
+              requester_name: materialInfo.REQUESTER_NAME,
+              nominal_thickness: materialInfo.NOMINAL_THICKNESS,
+              top_foil_cu_weight: materialInfo.TOP_FOIL_CU_WEIGHT,
+              bot_foil_cu_weight: materialInfo.BOT_FOIL_CU_WEIGHT
             }
           );
-          
-          await sendMailMaterialCore(emailSubject, emailHTML);
-          console.log(`Email notification sent for status change: ${oldStatus} -> ${newStatus}`);
+          let recipients = [...AllEmails];
+          if (creatorEmail && !recipients.includes(creatorEmail)) {
+            recipients.push(creatorEmail);
+          }
+          recipients = [...new Set(recipients)];
+
+          await sendMailMaterialCore(emailSubject, emailHTML, recipients);
+          console.log(`✅ Email sent successfully for status change: ${oldStatus} → ${newStatus} (ID: ${id})`);
+
+        } catch (emailError) {
+          console.error('❌ Failed to send status update email:', emailError);
         }
-      } catch (emailError) {
-        console.error('Warning: Failed to send status update email:', emailError);
-        // Không throw error để không ảnh hưởng đến quá trình cập nhật
-      }
+      });
     }
 
-    // Lưu lịch sử
+    // Save history
     try {
       await addHistoryRecord(connection, {
         materialCoreId: id,
         actionType: 'UPDATE',
         data: updateData,
-        createdBy: req.user.username
+        createdBy: req.user?.username || 'System'
       });
     } catch (historyError) {
       console.error('Warning: Failed to record history:', historyError);
+    }
+    if (oldStatus === 'Approve' && !isOnlyStatusUpdate) {
+      setImmediate(async () => {
+        try {
+          // So sánh các giá trị để tìm ra thay đổi
+          const changes = [];
+          const fieldLabels = {
+            requester_name: 'Người yêu cầu',
+            request_date: 'Ngày yêu cầu',
+            handler: 'Người xử lý',
+            vendor: 'Vendor',
+            family: 'Family',
+            prepreg_count: 'Prepreg Count',
+            nominal_thickness: 'Nominal Thickness',
+            spec_thickness: 'Spec Thickness',
+            preference_class: 'Preference Class',
+            use_type: 'Use Type',
+            rigid: 'Rigid',
+            top_foil_cu_weight: 'Top Foil Cu Weight',
+            bot_foil_cu_weight: 'Bot Foil Cu Weight',
+            tg_min: 'TG Min',
+            tg_max: 'TG Max',
+            center_glass: 'Center Glass',
+            dk_01g: 'DK 01G',
+            df_01g: 'DF 01G',
+            dk_0_001ghz: 'DK 0.001GHz',
+            df_0_001ghz: 'DF 0.001GHz',
+            dk_0_01ghz: 'DK 0.01GHz',
+            df_0_01ghz: 'DF 0.01GHz',
+            dk_0_02ghz: 'DK 0.02GHz',
+            df_0_02ghz: 'DF 0.02GHz',
+            dk_2ghz: 'DK 2GHz',
+            df_2ghz: 'DF 2GHz',
+            dk_2_45ghz: 'DK 2.45GHz',
+            df_2_45ghz: 'DF 2.45GHz',
+            dk_3ghz: 'DK 3GHz',
+            df_3ghz: 'DF 3GHz',
+            dk_4ghz: 'DK 4GHz',
+            df_4ghz: 'DF 4GHz',
+            dk_5ghz: 'DK 5GHz',
+            df_5ghz: 'DF 5GHz',
+            dk_6ghz: 'DK 6GHz',
+            df_6ghz: 'DF 6GHz',
+            dk_7ghz: 'DK 7GHz',
+            df_7ghz: 'DF 7GHz',
+            dk_8ghz: 'DK 8GHz',
+            df_8ghz: 'DF 8GHz',
+            dk_9ghz: 'DK 9GHz',
+            df_9ghz: 'DF 9GHz',
+            dk_10ghz: 'DK 10GHz',
+            df_10ghz: 'DF 10GHz',
+            dk_15ghz: 'DK 15GHz',
+            df_15ghz: 'DF 15GHz',
+            dk_16ghz: 'DK 16GHz',
+            df_16ghz: 'DF 16GHz',
+            dk_20ghz: 'DK 20GHz',
+            df_20ghz: 'DF 20GHz',
+            dk_25ghz: 'DK 25GHz',
+            df_25ghz: 'DF 25GHz',
+            dk_30ghz: 'DK 30GHz',
+            df_30ghz: 'DF 30GHz',
+            dk_35ghz: 'DK 35GHz',
+            df_35ghz: 'DF 35GHz',
+            dk_40ghz: 'DK 40GHz',
+            df_40ghz: 'DF 40GHz',
+            dk_45ghz: 'DK 45GHz',
+            df_45ghz: 'DF 45GHz',
+            dk_50ghz: 'DK 50GHz',
+            df_50ghz: 'DF 50GHz',
+            dk_55ghz: 'DK 55GHz',
+            df_55ghz: 'DF 55GHz',
+            is_hf: 'Is HF',
+            data_source: 'Data Source',
+            filename: 'Filename'
+          };
+
+          Object.keys(updateData).forEach(key => {
+            if (key !== 'status' && columnMapping[key]) {
+              const dbColumnName = columnMapping[key].toUpperCase();
+              const oldValue = oldRecordData[dbColumnName];
+              const newValue = updateData[key];
+
+              // So sánh giá trị (xử lý cho cả string và number)
+              const isChanged = oldValue !== newValue &&
+                !(oldValue == null && (newValue === '' || newValue == null)) &&
+                !(newValue == null && (oldValue === '' || oldValue == null));
+
+              if (isChanged) {
+                changes.push({
+                  field: fieldLabels[key] || key,
+                  fieldKey: key,
+                  oldValue: oldValue || 'Không có',
+                  newValue: newValue || 'Không có'
+                });
+              }
+            }
+          });
+
+          if (changes.length > 0) {
+            console.log(`Found ${changes.length} changes for approved material ID: ${id}`);
+
+            const emailSubject = `[Material System] ⚠️ Thay đổi dữ liệu Material Core đã được Approve - ID: ${id}`;
+            const emailHTML = generateMaterialChangeEmailHTML(
+              id,
+              changes,
+              req.user?.username || 'System',
+              {
+                vendor: oldRecordData.VENDOR,
+                family: oldRecordData.FAMILY,
+                requester_name: oldRecordData.REQUESTER_NAME,
+                nominal_thickness: oldRecordData.NOMINAL_THICKNESS,
+                top_foil_cu_weight: oldRecordData.TOP_FOIL_CU_WEIGHT,
+                bot_foil_cu_weight: oldRecordData.BOT_FOIL_CU_WEIGHT
+              }
+            );
+            let recipients = [...AllEmails];
+            if (creatorEmail && !recipients.includes(creatorEmail)) {
+              recipients.push(creatorEmail);
+            }
+            recipients = [...new Set(recipients)];
+
+            await sendMailMaterialCore(emailSubject, emailHTML, recipients);
+            console.log(`✅ Email sent successfully for material changes in approved record (ID: ${id})`);
+          }
+
+        } catch (emailError) {
+          console.error('❌ Failed to send material change email:', emailError);
+        }
+      });
     }
 
     res.json({
       message: 'Cập nhật thành công',
       data: updatedRecord.rows[0]
     });
-    
   } catch (err) {
     console.error('Error updating material core:', err);
     res.status(500).json({
@@ -847,7 +1061,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
   }
 });
 
-router.delete('/delete/:id', authenticateToken, async (req, res) => {
+router.delete('/delete/:id', authenticateToken, checkMaterialCorePermission(['delete']), async (req, res) => {
   let { id } = req.params;
   let connection;
   try {
@@ -914,7 +1128,7 @@ function cloneFileSync(src, dest) {
   fs.copyFileSync(src, dest);
 }
 
-router.post('/export-xlsm', async (req, res) => {
+router.post('/export-xlsm', authenticateToken, checkMaterialCorePermission(['view']), async (req, res) => {
   try {
     const data = req.body.data;
     if (!data || !Array.isArray(data)) {
@@ -998,7 +1212,6 @@ router.post('/export-xlsm', async (req, res) => {
   }
 });
 
-// Hàm chuyển key về lowercase (chuẩn hóa key từ Excel)
 function normalizeKeys(obj) {
   const newObj = {};
   Object.keys(obj).forEach(key => {
@@ -1007,18 +1220,17 @@ function normalizeKeys(obj) {
   return newObj;
 }
 
-// Hàm mapping tên cột Excel sang tên cột DB
 function mapExcelKeysToDbKeys(item) {
   const newItem = { ...item };
-  
+
   // Mapping cụ thể cho các trường đặc biệt
   const columnMapping = {
     'NOMINAL_THICKNESS_': 'NOMINAL_THICKNESS',
-    'SPEC_THK_': 'SPEC_THICKNESS', 
+    'SPEC_THK_': 'SPEC_THICKNESS',
     'DATA_SOURCE_': 'DATA_SOURCE',
     'H_USE_TYPE_': 'USE_TYPE',
-    'DK_01G_' : 'DK_01G',
-    'DF_01G_' : 'DF_01G',
+    'DK_01G_': 'DK_01G',
+    'DF_01G_': 'DF_01G',
     'DK_2_45GHz_': 'DK_2_45GHZ',
     'DF_2_45GHz_': 'DF_2_45GHZ',
     'DK_0_001GHz_': 'DK_0_001GHZ',
@@ -1061,7 +1273,7 @@ function mapExcelKeysToDbKeys(item) {
 
   // Chuẩn hóa về lowercase
   const normalized = normalizeKeys(newItem);
-  
+
   // Xử lý các trường DK/DF có dấu _ cuối nếu cần
   Object.keys(normalized).forEach(key => {
     if (/_(ghz)$/.test(key) && !key.endsWith('_ghz_')) {
@@ -1070,11 +1282,9 @@ function mapExcelKeysToDbKeys(item) {
       delete normalized[key];
     }
   });
-  
+
   return normalized;
 }
-
-// Hàm lấy danh sách giá trị hợp lệ cho Cu Weight
 function getValidCuWeightList(value) {
   if (!value) return ['Z'];
   return value
@@ -1083,9 +1293,7 @@ function getValidCuWeightList(value) {
     .map(v => v.trim())
     .filter(v => ['L', 'H', '1', '2', 'Z'].includes(v));
 }
-
-// Đổi từ GET sang POST, nhận data từ body
-router.post('/import-material-core', async (req, res) => {
+router.post('/import-material-core', authenticateToken, checkMaterialCorePermission(['create']), async (req, res) => {
   let connection;
   try {
     const { data } = req.body;
@@ -1239,14 +1447,10 @@ router.post('/import-material-core', async (req, res) => {
     }
   }
 });
-
-// Thêm route export XML vào cuối file material-core.js (trước module.exports = router;)
-
-// Helper function để chuyển đổi giá trị Cu Weight
 function convertCuWeight(value) {
   const mapping = {
     'L': '0.33 oz',
-    'H': '1 oz', 
+    'H': '1 oz',
     '1': '1 oz',
     '2': '2 oz',
     'Z': '0 oz'
@@ -1277,10 +1481,10 @@ function createCoreName(vendor, family, nominalThickness, topCu, botCu) {
   const thickness = nominalThickness || '0.000';
   const topCuDisplay = topCu === 'L' ? 'L' : (topCu === 'H' ? 'H' : topCu);
   const botCuDisplay = botCu === 'L' ? 'L' : (botCu === 'H' ? 'H' : botCu);
-  
+
   const name = `Core ${vendor || 'Unknown'} ${family || 'Unknown'} ${thickness}mm ${topCuDisplay}/${botCuDisplay}`;
   const genericName = `${thickness}mm ${topCuDisplay}/${botCuDisplay}`;
-  
+
   return { name, genericName };
 }
 
@@ -1289,7 +1493,7 @@ router.get('/export-xml', authenticateToken, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
-    
+
     // Query chỉ lấy những bản ghi có status = 'Pending'
     const result = await connection.execute(
       `SELECT 
@@ -1388,8 +1592,8 @@ router.get('/export-xml', authenticateToken, async (req, res) => {
     // Tạo XML cho từng bản ghi
     result.rows.forEach(row => {
       const { name, genericName } = createCoreName(
-        row.VENDOR, 
-        row.FAMILY, 
+        row.VENDOR,
+        row.FAMILY,
         row.NOMINAL_THICKNESS,
         row.TOP_FOIL_CU_WEIGHT,
         row.BOT_FOIL_CU_WEIGHT
@@ -1460,26 +1664,74 @@ router.get('/export-xml', authenticateToken, async (req, res) => {
 		DF_45GHZ_="${row.DF_45GHZ || '0'}"
 		DF_50GHZ_="${row.DF_50GHZ || '0'}"
 		IS_HF_="${formatBoolean(row.IS_HF)}"
+    IS_ROHS_=""
+		LOW_DK_=""
+		LOW_DF_=""
+		IPC_21_=""
+		IPC_24_=""
+		IPC_26_=""
+		IPC_97_=""
+		IPC_98_=""
+		IPC_99_=""
+		IPC_101_=""
+		IPC_124_=""
+		IPC_126_=""
+		COUNTRY_=""
+		COUNTRY_CODE_=""
 		DATA_SOURCE_="${row.DATA_SOURCE || row.FILENAME || ''}"
+    CU_TYPE_=""
+		CU_PROFILE_=""
 		TOP_FOIL_OUTER_ROUGHNESS="0 micron"
 		TOP_FOIL_INNER_ROUGHNESS="0 micron"
 		BOT_FOIL_OUTER_ROUGHNESS="0 micron"
 		BOT_FOIL_INNER_ROUGHNESS="0 micron"
 		OBSOLETE="false"
-		SUB_TYPE_="${row.FAMILY || ''}"
+		SUB_TYPE_=""
+		CU_TYPE_IPC_=""
+		CONTAINS_7628_=""
+		TG_TYPE_=""
+    LAMINATE_THICKNESS="1.464 mm"
+		DIELECTRIC_THICKNESS_="1.464 mm"
+		LAMINATE_THICKNESS_TOL_PLUS="75 micron"
+		LAMINATE_THICKNESS_TOL_MINUS="75 micron"
+		LAMINATE_PERMITTIVITY="4.8"
+		LAMINATE_DISSIPATION_FACTOR="0.011"
+		SHEET_SIZE_X="0 inch"
+		SHEET_SIZE_Y="0 inch"
+		GRAIN_DIRECTION="Vertical"
+		TOP_FOIL_THICKNESS="18 micron"
+		TOP_FOIL_THICKNESS_TOL_MINUS="0.9 micron"
+		TOP_FOIL_THICKNESS_TOL_PLUS="0.9 micron"
+		BOT_FOIL_THICKNESS="18 micron"
+		BOT_FOIL_THICKNESS_TOL_MINUS="0.9 micron"
+		BOT_FOIL_THICKNESS_TOL_PLUS="0.9 micron"
+		MRP_NAME=""
+		MRP_REVISION=""
+		MRP_REV_DESCRIPTION=""
+		TYPE="Core"
+		UNIT_TYPE="Quantity"
+		GLASS_TYPE="Glass Epoxy"
 	/>`;
     });
 
     xmlContent += `
 </interfacelist>
+<interfacelist INTERFACE="SITE_MATERIAL">
+	<SITE_MATERIAL 
+		MATERIAL_NAME="${name}"
+		COST="0"
+		GRADE_PREFERENCE="60"
+		PARENT_SITE_NAME="VN"
+	/>
+</interfacelist>
 </document>`;
 
     // Set headers để download file
     const filename = `MaterialCore_Pending_Export.xml`;
-    
+
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Content-Type', 'application/xml; charset=utf-8');
-    
+
     res.send(xmlContent);
 
   } catch (err) {

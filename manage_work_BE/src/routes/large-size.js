@@ -46,7 +46,6 @@ const checkBoPermission = async (req, res, next) => {
   }
 };
 
-// Áp dụng middleware cho tất cả các routes
 router.use(authenticateToken);
 router.use(checkBoPermission);
 
@@ -106,8 +105,6 @@ router.get('/list', async (req, res) => {
   }
 });
 router.post('/create', async (req, res) => {
-  console.log('POST /large-size/create body:', req.body);
-  console.log('req.user:', req.user);
   let connection;
   try {
     const {
@@ -718,7 +715,6 @@ router.delete('/delete/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// API khôi phục bản ghi đã xóa
 router.put('/restore/:id', async (req, res) => {
   let { id } = req.params;
   let connection;
@@ -904,7 +900,6 @@ router.get('/detail/:id', async (req, res) => {
   }
 });
 
-// API lấy lịch sử chỉnh sửa của một mã hàng
 router.get('/history/:id', async (req, res) => {
   let connection;
   try {
@@ -912,26 +907,29 @@ router.get('/history/:id', async (req, res) => {
     connection = await database.getConnection();
 
     const result = await connection.execute(
-      `SELECT 
-        history_id,
-        id,
-        type_board,
-        size_normal,
-        rate_normal,
-        size_big,
-        rate_big,
-        request,
-        confirm_by,
-        note,
-        customer_code,
-        is_deleted,
-        created_by_email,
-        action_by_email,
-        TO_CHAR(action_at, 'DD/MM/YYYY HH24:MI:SS') as action_at,
-        action_type
-       FROM large_size_history 
-       WHERE id = :id 
-       ORDER BY action_at DESC`,
+      `SELECT * FROM (
+        SELECT 
+          history_id,
+          id,
+          type_board,
+          size_normal,
+          rate_normal,
+          size_big,
+          rate_big,
+          request,
+          confirm_by,
+          note,
+          customer_code,
+          is_deleted,
+          created_by_email,
+          action_by_email,
+          TO_CHAR(action_at, 'DD/MM/YYYY HH24:MI:SS') as ACTION_AT,
+          action_type,
+          action_at as sort_date  
+        FROM large_size_history 
+        WHERE id = :id
+      ) 
+      ORDER BY sort_date ASC`,  
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -949,12 +947,20 @@ router.get('/history/:id', async (req, res) => {
 // API hủy yêu cầu sử dụng bo (chỉ khi chưa xác nhận)
 router.put('/cancel-request/:id', async (req, res) => {
   let { id } = req.params;
+  const { reason } = req.body; // Lấy reason từ request body
   let connection;
+
   try {
     if (!id || isNaN(Number(id))) {
       return res.status(400).json({ message: 'ID không hợp lệ' });
     }
     id = Number(id);
+
+    // Validation reason
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ message: 'Vui lòng nhập lý do hủy yêu cầu' });
+    }
+
     connection = await database.getConnection();
 
     // Lấy thông tin bản ghi
@@ -963,18 +969,30 @@ router.put('/cancel-request/:id', async (req, res) => {
       { id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
+
     const record = recordInfo.rows[0];
     if (!record) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
+
     if (record.IS_CANCELED === 1) {
       return res.status(400).json({ message: 'Bản ghi đã bị hủy trước đó.' });
     }
 
-    // Thực hiện cập nhật is_canceled = 1
+    // Lưu note cũ và reason mới
+    const oldNote = record.NOTE || '';
+    const cancelReason = reason.trim();
+
+    // Cập nhật is_canceled = 1, lưu reason vào cột REASON và hiển thị reason làm note mới
     await connection.execute(
-      `UPDATE large_size SET is_canceled = 1 WHERE id = :id`,
-      { id },
+      `UPDATE large_size 
+       SET is_canceled = 1, reason = :reason, note = :note 
+       WHERE id = :id`,
+      {
+        id,
+        reason: cancelReason, // Lưu vào cột REASON
+        note: cancelReason // Hiển thị reason làm note mới
+      },
       { autoCommit: false }
     );
 
@@ -983,11 +1001,11 @@ router.put('/cancel-request/:id', async (req, res) => {
     await connection.execute(
       `INSERT INTO large_size_history (
         history_id, id, type_board, size_normal, rate_normal, size_big, rate_big,
-        request, confirm_by, note, customer_code, is_deleted, created_by_email,
+        request, confirm_by, note, reason, customer_code, is_deleted, created_by_email,
         action_by_email, action_at, action_type
       ) VALUES (
         :history_id, :id, :type_board, :size_normal, :rate_normal, :size_big, :rate_big,
-        :request, :confirm_by, :note, :customer_code, 0, :created_by_email,
+        :request, :confirm_by, :note, :reason, :customer_code, 0, :created_by_email,
         :action_by_email, CURRENT_TIMESTAMP, 'CANCEL'
       )`,
       {
@@ -1000,7 +1018,8 @@ router.put('/cancel-request/:id', async (req, res) => {
         rate_big: record.RATE_BIG || '',
         request: record.REQUEST || '',
         confirm_by: record.CONFIRM_BY || '',
-        note: record.NOTE || '',
+        note: oldNote,
+        reason: cancelReason,
         customer_code: record.CUSTOMER_CODE,
         created_by_email: record.CREATED_BY_EMAIL || '',
         action_by_email: req.user?.username || ''
@@ -1038,6 +1057,14 @@ router.put('/cancel-request/:id', async (req, res) => {
           <td>${record.RATE_BIG || ''}</td>
         </tr>
         <tr>
+          <th align="left">Note cũ</th>
+          <td>${oldNote || 'Không có'}</td>
+        </tr>
+        <tr>
+          <th align="left">Lý do hủy</th>
+          <td style="color: #ff4d4f; font-weight: bold;">${cancelReason}</td>
+        </tr>
+        <tr>
           <th align="left">Người hủy</th>
           <td>${req.user?.username || 'N/A'}</td>
         </tr>
@@ -1053,7 +1080,7 @@ router.put('/cancel-request/:id', async (req, res) => {
     const mailRecipients = [...new Set([
       ...AllEmails,
       record.CREATED_BY_EMAIL,
-      record.ACTION_BY_EMAIL,
+      req.user?.username,
     ].filter(Boolean))];
 
     sendMail(
@@ -1063,20 +1090,24 @@ router.put('/cancel-request/:id', async (req, res) => {
     );
 
     res.json({
-      success: true, // Thêm field success để frontend dễ check
+      success: true,
       message: 'Hủy yêu cầu thành công',
       id: id,
       data: {
         id: id,
         customer_code: record.CUSTOMER_CODE,
-        is_deleted: 1
+        is_canceled: 1,
+        old_note: oldNote,
+        reason: cancelReason,
+        new_note: `Lý do hủy: ${cancelReason}`
       }
     });
+
   } catch (err) {
     if (connection) {
       try { await connection.rollback(); } catch (e) { }
     }
-    console.error('Error in PUT /cancel/:id:', err);
+    console.error('Error in PUT /cancel-request/:id:', err);
     res.status(500).json({ error: err.message });
   } finally {
     if (connection) try { await connection.close(); } catch (e) { }
