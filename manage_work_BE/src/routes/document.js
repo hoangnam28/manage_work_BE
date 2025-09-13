@@ -5,9 +5,13 @@ const database = require('../config/database');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const {
+  generateNewReviewHTML,
+  generateUpdateDeadlineHTML,
+  sendMail } = require('../helper/sendMailRemind');
 
 
-oracledb.fetchAsBuffer = [ oracledb.BLOB ];
+oracledb.fetchAsBuffer = [oracledb.BLOB];
 oracledb.autoCommit = true;
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -15,7 +19,7 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 router.post('/add', async (req, res) => {
-  const { ma, khach_hang, ma_tai_lieu, doi_tuong = null, created_by } = req.body; 
+  const { ma, khach_hang, ma_tai_lieu, doi_tuong = null, ky_han, created_by } = req.body;
   let connection;
 
   try {
@@ -26,28 +30,45 @@ router.post('/add', async (req, res) => {
     );
     const stt = seqResult.rows[0][0];
 
+    // Format the date for Oracle
+    const kyHanDate = ky_han ? new Date(ky_han) : null;
+
     const result = await connection.execute(
       `INSERT INTO document_columns (
-        column_id, stt, ma, khach_hang, ma_tai_lieu, doi_tuong,ky_han,
+        column_id, stt, ma, khach_hang, ma_tai_lieu, doi_tuong, ky_han,
         created_by, created_at
       ) VALUES (
-        seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu, :doi_tuong, :ky_han,
+        seq_document_columns.NEXTVAL, :stt, :ma, :khach_hang, :ma_tai_lieu, :doi_tuong, 
+        TO_DATE(:ky_han, 'YYYY-MM-DD HH24:MI:SS'),
         :created_by, CURRENT_TIMESTAMP
       )`,
-      { 
+      {
         stt,
-        ma, 
-        khach_hang, 
+        ma,
+        khach_hang,
         ma_tai_lieu,
-        doi_tuong, 
-        ky_han,
+        doi_tuong,
+        ky_han: kyHanDate ? kyHanDate.toISOString().replace('T', ' ').split('.')[0] : null,
         created_by
       },
       { autoCommit: true }
     );
+    // Gửi mail thông báo tạo mới
+    await sendMail(
+      'Thông báo: Review tài liệu mới được tạo',
+      generateNewReviewHTML({
+        stt,
+        ma,
+        khach_hang,
+        ma_tai_lieu,
+        ky_han,
+        created_by
+      }),
+      null
+    );
 
-    res.json({ 
-      message: 'Thêm dữ liệu thành công', 
+    res.json({
+      message: 'Thêm dữ liệu thành công',
       id: result.lastRowid,
       data: {
         stt,
@@ -61,9 +82,9 @@ router.post('/add', async (req, res) => {
     });
   } catch (err) {
     console.error('Error adding record:', err);
-    res.status(500).json({ 
-      message: 'Lỗi server', 
-      error: err.message 
+    res.status(500).json({
+      message: 'Lỗi server',
+      error: err.message
     });
   } finally {
     if (connection) await connection.close();
@@ -82,10 +103,10 @@ router.put('/update/:column_id', async (req, res) => {
       { column_id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-
     if (oldDataResult.rows.length === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
+    const kyHanDate = data.ky_han ? new Date(data.ky_han) : null;
 
     const oldData = oldDataResult.rows[0];
     await connection.execute(
@@ -98,9 +119,10 @@ router.put('/update/:column_id', async (req, res) => {
         cong_venh = :cong_venh,
         v_cut = :v_cut,
         xu_ly_be_mat = :xu_ly_be_mat,
-        ghi_chu = :ghi_chu
+        ghi_chu = :ghi_chu,
+        ky_han = :ky_han
       WHERE column_id = :column_id`,
-      { 
+      {
         ma: data.ma,
         khach_hang: data.khach_hang,
         doi_tuong: data.doi_tuong,
@@ -110,9 +132,53 @@ router.put('/update/:column_id', async (req, res) => {
         v_cut: data.v_cut,
         xu_ly_be_mat: data.xu_ly_be_mat,
         ghi_chu: data.ghi_chu,
+        ky_han: kyHanDate,
         column_id
       }
     );
+    const formatDateForComparison = (date) => {
+      if (!date) return null;
+      if (date instanceof Date) {
+        return date.toISOString().split('T')[0]; // Format: YYYY-MM-DD
+      }
+      if (typeof date === 'string') {
+        return new Date(date).toISOString().split('T')[0];
+      }
+      return null;
+    };
+
+    // Debug: In ra giá trị để kiểm tra
+    console.log('=== DEBUG KỲ HẠN ===');
+    console.log('oldData.KY_HAN:', oldData.KY_HAN, 'Type:', typeof oldData.KY_HAN);
+    console.log('data.ky_han:', data.ky_han, 'Type:', typeof data.ky_han);
+
+    const oldKyHan = formatDateForComparison(oldData.KY_HAN);
+    const newKyHan = formatDateForComparison(data.ky_han);
+
+    console.log('oldKyHan (formatted):', oldKyHan);
+    console.log('newKyHan (formatted):', newKyHan);
+    console.log('Are they equal?', oldKyHan === newKyHan);
+
+    // Chỉ gửi mail khi kỳ hạn thực sự thay đổi
+    if (oldKyHan !== newKyHan) {
+      console.log('✉️ SENDING EMAIL - Kỳ hạn đã thay đổi:', oldKyHan, '->', newKyHan);
+
+      // Gửi mail thông báo cập nhật kỳ hạn
+      await sendMail(
+        'Thông báo: Cập nhật kỳ hạn Review task',
+        generateUpdateDeadlineHTML({
+          ma: data.ma,
+          khach_hang: data.khach_hang,
+          ma_tai_lieu: data.ma_tai_lieu,
+          old_ky_han: oldData.KY_HAN,
+          new_ky_han: data.ky_han,
+          edited_by
+        }),
+        null
+      );
+    } else {
+      console.log('✅ NO EMAIL - Kỳ hạn không thay đổi');
+    }
     for (const [field, newValue] of Object.entries(data)) {
       if (field !== 'edited_by') {
         const oldValue = oldData[field.toUpperCase()];
@@ -155,7 +221,7 @@ router.put('/update/:column_id', async (req, res) => {
     res.json({ message: 'Cập nhật thành công' });
   } catch (err) {
     console.error('Error updating record:', err);
-    
+
     if (connection) {
       try {
         await connection.rollback();
@@ -163,10 +229,10 @@ router.put('/update/:column_id', async (req, res) => {
         console.error('Error during rollback:', rollbackError);
       }
     }
-    
-    res.status(500).json({ 
+
+    res.status(500).json({
       message: 'Lỗi khi cập nhật',
-      error: err.message 
+      error: err.message
     });
   } finally {
     if (connection) {
@@ -181,22 +247,22 @@ router.put('/update/:column_id', async (req, res) => {
 
 
 router.delete('/delete/:column_id', async (req, res) => {
-    const { column_id } = req.params;
-    let connection;
-    try {
-        connection = await database.getConnection();
-        await connection.execute(
-            `DELETE FROM document_columns WHERE column_id = :column_id`,
-              { column_id },
-            { autoCommit: true }
-        );
-        res.json({ message: 'Xóa thành công' });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: 'Lỗi server' });
-    } finally {
-        if (connection) await connection.close();
-    }
+  const { column_id } = req.params;
+  let connection;
+  try {
+    connection = await database.getConnection();
+    await connection.execute(
+      `DELETE FROM document_columns WHERE column_id = :column_id`,
+      { column_id },
+      { autoCommit: true }
+    );
+    res.json({ message: 'Xóa thành công' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Lỗi server' });
+  } finally {
+    if (connection) await connection.close();
+  }
 });
 
 // Cấu hình multer để lưu file vào thư mục uploads
@@ -231,9 +297,9 @@ router.post('/upload-images/:column_id/:field', upload.array('images', 10), asyn
       return connection.execute(
         `INSERT INTO images (column_id, file_path, field_name) 
          VALUES (:column_id, :file_path, :field)`,
-        { 
+        {
           column_id: column_id,
-          file_path: file.filename, 
+          file_path: file.filename,
           field: field
         }
       );
@@ -246,10 +312,10 @@ router.post('/upload-images/:column_id/:field', upload.array('images', 10), asyn
       `SELECT file_path FROM images WHERE column_id = :column_id AND field_name = :field`,
       { column_id, field }
     );
-    
+
     const images = newImagesResult.rows.map(row => row[0]);
 
-    res.json({ 
+    res.json({
       message: 'Tải lên hình ảnh thành công',
       images: images
     });
@@ -273,7 +339,7 @@ router.get('/get-images/:column_id/:field', async (req, res) => {
       `SELECT file_path FROM images WHERE column_id = :column_id AND field_name = :field`,
       { column_id, field }
     );
-    const images = result.rows ? result.rows.map(row => row[0]) : [];    
+    const images = result.rows ? result.rows.map(row => row[0]) : [];
     res.json({ images });
 
   } catch (err) {
@@ -285,54 +351,55 @@ router.get('/get-images/:column_id/:field', async (req, res) => {
 
 // Sửa lại API lấy danh sách
 router.get('/list', async (req, res) => {
-    let connection;
-    try {
-        connection = await database.getConnection();
-        const result = await connection.execute(
-            `SELECT 
+  let connection;
+  try {
+    connection = await database.getConnection();
+    const result = await connection.execute(
+      `SELECT 
                 column_id, stt, ma, khach_hang, ma_tai_lieu,doi_tuong, rev, 
                 cong_venh, v_cut, xu_ly_be_mat, ghi_chu,
                 created_by, TO_CHAR(created_at, 'DD/MM/YYYY HH24:MI:SS') as created_at,
                 is_deleted, deleted_by,
                 TO_CHAR(deleted_at, 'DD/MM/YYYY HH24:MI:SS') as deleted_at,
-                restored_by, TO_CHAR(restored_at, 'DD/MM/YYYY HH24:MI:SS') as restored_at
+                restored_by, TO_CHAR(restored_at, 'DD/MM/YYYY HH24:MI:SS') as restored_at,
+                TO_CHAR(ky_han, 'DD/MM/YYYY') as ky_han
             FROM document_columns 
             ORDER BY stt ASC`,
-            {},
-            { outFormat: oracledb.OUT_FORMAT_OBJECT }
-        );
-        
-        // Xử lý dữ liệu GHI_CHU trước khi trả về
-        const processedRows = result.rows.map(row => {
-            const processedRow = { ...row };
-            if (processedRow.GHI_CHU === null || processedRow.GHI_CHU === undefined) {
-                processedRow.GHI_CHU = '';
-            }
-            else if (typeof processedRow.GHI_CHU === 'string') {
-                if (processedRow.GHI_CHU.includes('_events') || 
-                    processedRow.GHI_CHU.includes('_readableState')) {
-                    processedRow.GHI_CHU = '';
-                }
-            }
-            return processedRow;
-        });
-        
-        res.json(processedRows);
-    } catch (err) {
-        console.error('Error in /list route:', err);
-        res.status(500).json({ 
-            message: 'Lỗi server', 
-            error: err.message
-        });
-    } finally {
-        if (connection) {
-            try {
-                await connection.close();
-            } catch (err) {
-                console.error('Error closing connection:', err);
-            }
+      {},
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    // Xử lý dữ liệu GHI_CHU trước khi trả về
+    const processedRows = result.rows.map(row => {
+      const processedRow = { ...row };
+      if (processedRow.GHI_CHU === null || processedRow.GHI_CHU === undefined) {
+        processedRow.GHI_CHU = '';
+      }
+      else if (typeof processedRow.GHI_CHU === 'string') {
+        if (processedRow.GHI_CHU.includes('_events') ||
+          processedRow.GHI_CHU.includes('_readableState')) {
+          processedRow.GHI_CHU = '';
         }
+      }
+      return processedRow;
+    });
+
+    res.json(processedRows);
+  } catch (err) {
+    console.error('Error in /list route:', err);
+    res.status(500).json({
+      message: 'Lỗi server',
+      error: err.message
+    });
+  } finally {
+    if (connection) {
+      try {
+        await connection.close();
+      } catch (err) {
+        console.error('Error closing connection:', err);
+      }
     }
+  }
 });
 
 // Thêm middleware để phục vụ thư mục uploads
@@ -342,7 +409,7 @@ router.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 router.get('/check-image/:filename', (req, res) => {
   const { filename } = req.params;
   const filePath = path.join(__dirname, '../../uploads', filename);
-  
+
   if (fs.existsSync(filePath)) {
     res.sendFile(filePath);
   } else {
@@ -384,7 +451,7 @@ router.get('/get-all-images', async (req, res) => {
     const result = await connection.execute(
       `SELECT DISTINCT file_path FROM images`
     );
-    
+
     const images = result.rows.map(row => row[0]);
     res.json({ images });
   } catch (err) {
@@ -400,10 +467,10 @@ router.get('/get-all-images', async (req, res) => {
 router.get('/edit-history/:column_id/:field', async (req, res) => {
   const { column_id, field } = req.params;
   let connection;
-  
+
   try {
     connection = await database.getConnection();
-    
+
     const creatorInfo = await connection.execute(
       `SELECT 
         created_by,
@@ -427,21 +494,21 @@ router.get('/edit-history/:column_id/:field', async (req, res) => {
        WHERE h.column_id = :column_id 
        AND h.field_name = :field
        ORDER BY h.edit_time DESC`,
-      { 
+      {
         column_id: column_id,
-        field: field 
+        field: field
       },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    
+
     res.json({
       creator: creatorInfo.rows[0],
       history: editHistory.rows
     });
   } catch (err) {
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Lỗi khi lấy lịch sử chỉnh sửa',
-      error: err.message 
+      error: err.message
     });
   } finally {
     if (connection) {
@@ -461,7 +528,7 @@ router.put('/soft-delete/:column_id', async (req, res) => {
 
   try {
     connection = await database.getConnection();
-    
+
     await connection.execute(
       `UPDATE document_columns 
        SET IS_DELETED = 1, 
@@ -470,7 +537,7 @@ router.put('/soft-delete/:column_id', async (req, res) => {
        WHERE COLUMN_ID = :column_id`,
       { column_id, username }
     );
-    
+
     await connection.commit();
     res.json({ message: 'Đánh dấu xóa thành công' });
   } catch (error) {
@@ -494,7 +561,7 @@ router.put('/restore/:column_id', async (req, res) => {
 
   try {
     connection = await database.getConnection();
-    
+
     await connection.execute(
       `UPDATE document_columns 
        SET IS_DELETED = 0, 
@@ -505,7 +572,7 @@ router.put('/restore/:column_id', async (req, res) => {
        WHERE COLUMN_ID = :column_id`,
       { column_id, username }
     );
-    
+
     await connection.commit();
     res.json({ message: 'Khôi phục dữ liệu thành công' });
   } catch (error) {
@@ -552,7 +619,7 @@ router.post('/confirm-review', async (req, res) => {
           :reviewed_by,
           CURRENT_TIMESTAMP
         )`,
-        { 
+        {
           column_id: Number(column_id),
           reviewed_by
         }
@@ -564,7 +631,7 @@ router.post('/confirm-review', async (req, res) => {
           ${reviewField}_reviewed_by = :reviewed_by,
           ${reviewField}_reviewed_at = CURRENT_TIMESTAMP
         WHERE column_id = :column_id`,
-        { 
+        {
           column_id: Number(column_id),
           reviewed_by
         }
@@ -601,7 +668,7 @@ router.post('/confirm-review', async (req, res) => {
         console.error('Error during rollback:', rollbackError);
       }
     }
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Lỗi khi cập nhật trạng thái review',
       error: err.message
     });
@@ -622,7 +689,7 @@ router.get('/review-status/:column_id', async (req, res) => {
 
   try {
     connection = await database.getConnection();
-    
+
     const result = await connection.execute(
       `SELECT 
         ci_reviewed,
@@ -651,9 +718,9 @@ router.get('/review-status/:column_id', async (req, res) => {
 
   } catch (err) {
     console.error('Error in review-status:', err);
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Lỗi khi lấy trạng thái review',
-      error: err.message 
+      error: err.message
     });
   } finally {
     if (connection) {
@@ -709,7 +776,7 @@ router.post('/reset-review-field', async (req, res) => {
         console.error('Error during rollback:', rollbackError);
       }
     }
-    res.status(500).json({ 
+    res.status(500).json({
       message: 'Lỗi khi reset trạng thái review cho trường',
       error: err.message
     });
