@@ -11,6 +11,7 @@ const {
   generateCreateMaterialEmailHTML,
   generateStatusUpdateEmailHTML,
   generateMaterialChangeEmailHTML,
+  generateMaterialDeleteEmailHTML,
   sendMailMaterialCore
 } = require('../helper/sendMailMaterialCore');
 
@@ -23,7 +24,35 @@ const { addHistoryRecord } = require('./material-core-history');
 
 const AllEmails = [
   'trang.nguyenkieu@meiko-elec.com',
-  'thuy.nguyen2@meiko-elec.com'
+  'thuy.nguyen2@meiko-elec.com',
+  'thanh.vutien@meiko-elec.com',
+  // 'hue.hoangthi@meiko-elec.com',
+  // 'thoi.nguyen@meiko-elec.com',
+  // 'thuy.nguyen1@meiko-elec.com',
+  // 'hung.khuathuu@meiko-elec.com',
+  // 'quyen.tavan@meiko-elec.com',
+  // 'thuy.nguyen1@meiko-elec.com',
+  // 'khoi.lecong@meiko-elec.com',
+  // 'thuy.nguyen1@meiko-elec.com',
+  // 'hung.nguyen@meiko-elec.com',
+  // 'phong.nguyentuan@meiko-elec.com',
+  // 'quang.nguyenvan3@meiko-elec.com',
+  // 'haianh.nguyen@meiko-elec.com',
+  // 'duy.vuquang@meiko-elec.com',
+  // 'son.lebao@meiko-elec.com',
+  // 'loc.doan@meiko-elec.com',
+  // 'tuyetanh.tran@meiko-elec.com',
+  // 'anh.dohong@meiko-elec.com',
+  // 'khanh.leduyquoc@meiko-elec.com',
+  // 'tu.kieuviet@meiko-elec.com',
+  // 'an.lexuan@meiko-elec.com',
+  // 'giang.nguyenhong@meiko-elec.com',
+  // 'trung.phamngoc@meiko-elec.com',
+  // 'tuan.phamminh@meiko-elec.com',
+  'nam.nguyenhoang@meiko-elec.com',
+  'trung.khuatvan@meiko-elec.com',
+  'hung.nguyencong@meiko-elec.com',
+  'van.trinh@meiko-elec.com'
 ];
 
 
@@ -49,11 +78,9 @@ router.get('/list', authenticateToken, checkMaterialCorePermission(['view']), as
         const paramName = `SEARCH_${fieldName}`;
 
         if (stringColumns.includes(fieldName)) {
-          // Tìm kiếm LIKE cho text
           searchConditions.push(`UPPER(${fieldName}) LIKE :${paramName}`);
           searchBindings[paramName] = `%${searchValue.toUpperCase()}%`;
         } else if (numberColumns.includes(fieldName)) {
-          // Tìm kiếm chính xác hoặc khoảng cho số
           searchConditions.push(`${fieldName} = :${paramName}`);
           searchBindings[paramName] = parseFloat(searchValue);
         }
@@ -61,97 +88,100 @@ router.get('/list', authenticateToken, checkMaterialCorePermission(['view']), as
     });
 
     connection = await database.getConnection();
-    // Tạo WHERE clause với điều kiện tìm kiếm
     const searchWhere = searchConditions.length > 0
-      ? `AND ${searchConditions.join(' AND ')}`
+      ? `WHERE ${searchConditions.join(' AND ')}`
       : '';
-
-    // Query để đếm tổng số records
     const countQuery = `
-      SELECT COUNT(*) as total 
-      FROM material_core
-      WHERE is_deleted = 0 ${searchWhere}
-    `;
+        SELECT COUNT(*) as total 
+        FROM material_core
+        ${searchWhere}
+      `;
 
     let mainQuery = `
-      SELECT * FROM (
-        SELECT a.*, ROW_NUMBER() OVER (ORDER BY id DESC) as rn FROM (
-          SELECT 
-            id,
-            requester_name,
-            request_date,
-            handler,
-            status,
-            complete_date,
-            vendor,
-            family,
-            prepreg_count,
-            nominal_thickness,
-            spec_thickness,
-            preference_class,
-            use_type,
-            rigid,
-            top_foil_cu_weight,
-            bot_foil_cu_weight,
-            tg_min,
-            tg_max,
-            center_glass,
-            DK_0_001GHZ_ as dk_0_001ghz,
-            DF_0_001GHZ_ as df_0_001ghz,
-            DK_0_01GHZ_ as dk_0_01ghz,
-            DF_0_01GHZ_ as df_0_01ghz,
-            DK_0_02GHZ_ as dk_0_02ghz,
-            DF_0_02GHZ_ as df_0_02ghz,
-            DK_2GHZ_ as dk_2ghz,
-            DF_2GHZ_ as df_2ghz,
-            DK_2_45GHZ_ as dk_2_45ghz,
-            DF_2_45GHZ_ as df_2_45ghz,
-            DK_3GHZ_ as dk_3ghz,
-            DF_3GHZ_ as df_3ghz,
-            DK_4GHZ_ as dk_4ghz,
-            DF_4GHZ_ as df_4ghz,
-            DK_5GHZ_ as dk_5ghz,
-            DF_5GHZ_ as df_5ghz,
-            DK_6GHZ_ as dk_6ghz,
-            DF_6GHZ_ as df_6ghz,
-            DK_7GHZ_ as dk_7ghz,
-            DF_7GHZ_ as df_7ghz,
-            DK_8GHZ_ as dk_8ghz,
-            DF_8GHZ_ as df_8ghz,
-            DK_9GHZ_ as dk_9ghz,
-            DF_9GHZ_ as df_9ghz,
-            DK_10GHZ_ as dk_10ghz,
-            DF_10GHZ_ as df_10ghz,
-            DK_15GHZ_ as dk_15ghz,
-            DF_15GHZ_ as df_15ghz,
-            DK_16GHZ_ as dk_16ghz,
-            DF_16GHZ_ as df_16ghz,
-            DK_20GHZ_ as dk_20ghz,
-            DF_20GHZ_ as df_20ghz,
-            DK_01G as dk_01g,
-            DF_01G as df_01g,
-            DK_25GHZ_ as dk_25ghz,
-            DF_25GHZ_ as df_25ghz,
-            DK_30GHZ_ as dk_30ghz,
-            DF_30GHZ_ as df_30ghz,
-            DK_35GHZ__ as dk_35ghz,
-            DF_35GHZ__ as df_35ghz,
-            DK_40GHZ_ as dk_40ghz,
-            DF_40GHZ_ as df_40ghz,
-            DK_45GHZ_ as dk_45ghz,
-            DF_45GHZ_ as df_45ghz,
-            DK_50GHZ_ as dk_50ghz,
-            DF_50GHZ_ as df_50ghz,
-            DK_55GHZ_ as dk_55ghz,
-            DF_55GHZ_ as df_55ghz,
-            is_hf,
-            data_source,
-            filename
-          FROM material_core 
-          WHERE is_deleted = 0 ${searchWhere}
-        ) a
-      ) 
-      WHERE rn > :offset AND rn <= :limit`;
+  SELECT * FROM (
+      SELECT a.*, ROW_NUMBER() OVER (
+        ORDER BY 
+        id DESC  
+    ) as rn FROM (
+      SELECT 
+        id,
+        requester_name,
+        request_date,
+        handler,
+        status,
+        complete_date,
+        vendor,
+        family,
+        prepreg_count,
+        nominal_thickness,
+        spec_thickness,
+        preference_class,
+        use_type,
+        rigid,
+        top_foil_cu_weight,
+        bot_foil_cu_weight,
+        tg_min,
+        tg_max,
+        center_glass,
+        DK_0_001GHZ_ as dk_0_001ghz,
+        DF_0_001GHZ_ as df_0_001ghz,
+        DK_0_01GHZ_ as dk_0_01ghz,
+        DF_0_01GHZ_ as df_0_01ghz,
+        DK_0_02GHZ_ as dk_0_02ghz,
+        DF_0_02GHZ_ as df_0_02ghz,
+        DK_2GHZ_ as dk_2ghz,
+        DF_2GHZ_ as df_2ghz,
+        DK_2_45GHZ_ as dk_2_45ghz,
+        DF_2_45GHZ_ as df_2_45ghz,
+        DK_3GHZ_ as dk_3ghz,
+        DF_3GHZ_ as df_3ghz,
+        DK_4GHZ_ as dk_4ghz,
+        DF_4GHZ_ as df_4ghz,
+        DK_5GHZ_ as dk_5ghz,
+        DF_5GHZ_ as df_5ghz,
+        DK_6GHZ_ as dk_6ghz,
+        DF_6GHZ_ as df_6ghz,
+        DK_7GHZ_ as dk_7ghz,
+        DF_7GHZ_ as df_7ghz,
+        DK_8GHZ_ as dk_8ghz,
+        DF_8GHZ_ as df_8ghz,
+        DK_9GHZ_ as dk_9ghz,
+        DF_9GHZ_ as df_9ghz,
+        DK_10GHZ_ as dk_10ghz,
+        DF_10GHZ_ as df_10ghz,
+        DK_15GHZ_ as dk_15ghz,
+        DF_15GHZ_ as df_15ghz,
+        DK_16GHZ_ as dk_16ghz,
+        DF_16GHZ_ as df_16ghz,
+        DK_20GHZ_ as dk_20ghz,
+        DF_20GHZ_ as df_20ghz,
+        DK_01G as dk_01g,
+        DF_01G as df_01g,
+        DK_25GHZ_ as dk_25ghz,
+        DF_25GHZ_ as df_25ghz,
+        DK_30GHZ_ as dk_30ghz,
+        DF_30GHZ_ as df_30ghz,
+        DK_35GHZ__ as dk_35ghz,
+        DF_35GHZ__ as df_35ghz,
+        DK_40GHZ_ as dk_40ghz,
+        DF_40GHZ_ as df_40ghz,
+        DK_45GHZ_ as dk_45ghz,
+        DF_45GHZ_ as df_45ghz,
+        DK_50GHZ_ as dk_50ghz,
+        DF_50GHZ_ as df_50ghz,
+        DK_55GHZ_ as dk_55ghz,
+        DF_55GHZ_ as df_55ghz,
+        is_hf,
+        reason,
+        data_source,
+        filename,
+        is_deleted  
+      FROM material_core 
+      ${searchWhere}  
+    ) a
+  ) 
+  WHERE rn > :offset AND rn <= :limit`;
+
     const bindParams = {
       offset: offset,
       limit: offset + validPageSize,
@@ -267,6 +297,7 @@ router.get('/all', authenticateToken, async (req, res) => {
         DK_55GHZ_ as dk_55ghz,
         DF_55GHZ_ as df_55ghz,
         is_hf,
+        reason,
         data_source,
         filename
        FROM material_core
@@ -406,7 +437,7 @@ router.post('/create', authenticateToken, checkMaterialCorePermission(['create']
         df_50ghz: data.df_50ghz,
         dk_55ghz: data.dk_55ghz,
         df_55ghz: data.df_55ghz,
-        is_hf: data.is_hf || 'FALSE',
+        is_hf: data.is_hf !== undefined && data.is_hf !== null ? data.is_hf : 'FALSE',
         data_source: data.data_source,
         filename: data.filename,
         is_deleted: 0,
@@ -477,7 +508,7 @@ router.post('/create', authenticateToken, checkMaterialCorePermission(['create']
           :is_hf, :data_source, :filename, :is_deleted
         )`,
         bindParams,
-        { autoCommit: true } 
+        { autoCommit: true }
       );
 
       // Lưu lịch sử
@@ -571,8 +602,6 @@ router.post('/create', authenticateToken, checkMaterialCorePermission(['create']
       data: createdRecords
     });
 
-    // ✅ Gửi email bất đồng bộ ở background (không chờ kết quả)
-    // Sử dụng setImmediate hoặc process.nextTick để chạy sau khi response đã gửi
     setImmediate(async () => {
       try {
         const emailSubject = `[Material System] Tạo mới Material Core - ${data.vendor || 'N/A'} | ${data.family || 'N/A'}`;
@@ -621,13 +650,20 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
   let connection;
-  const isStatusUpdate = updateData.status && Object.keys(updateData).length <= 3;
 
-  if (isStatusUpdate) {
-    // Chỉ admin mới có thể approve/cancel
+  const isStatusOnlyUpdate = () => {
+  const keys = Object.keys(updateData);
+  const allowedKeys = ['status', 'complete_date', 'id', 'reason', 'handler'];
+  const hasStatus = 'status' in updateData;
+  const hasOtherFields = keys.some(key => !allowedKeys.includes(key));
+  
+  return hasStatus && !hasOtherFields;
+};
+  if (isStatusOnlyUpdate()) {
+    // Chỉ cập nhật trạng thái
     const hasApprovePermission = checkMaterialCorePermission(['approve']);
     try {
-      hasApprovePermission(req, res, () => { }); // Test permission
+      hasApprovePermission(req, res, () => { });
     } catch (error) {
       return res.status(403).json({
         message: 'Chỉ Admin mới có quyền Approve/Cancel',
@@ -635,19 +671,32 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       });
     }
   } else {
-    // Cập nhật thông tin khác - admin và edit
+    // Cập nhật field khác => yêu cầu quyền edit và phải có lý do
     const hasEditPermission = checkMaterialCorePermission(['edit']);
     try {
-      hasEditPermission(req, res, () => { }); // Test permission
+      hasEditPermission(req, res, () => { });
     } catch (error) {
       return res.status(403).json({
         message: 'Bạn không có quyền chỉnh sửa',
         code: 'INSUFFICIENT_PERMISSIONS'
       });
     }
+
+    if (!updateData.reason || updateData.reason.trim() === '') {
+      return res.status(400).json({
+        message: 'Vui lòng nhập lý do cập nhật',
+        code: 'REASON_REQUIRED'
+      });
+    }
+
+    if (updateData.reason.trim().length < 5) {
+      return res.status(400).json({
+        message: 'Lý do cập nhật phải có ít nhất 5 ký tự',
+        code: 'REASON_TOO_SHORT'
+      });
+    }
   }
 
-  const isOnlyStatusUpdate = updateData.status && Object.keys(updateData).length === 1;
 
   try {
     // Verify that id exists
@@ -687,26 +736,37 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 
     const oldStatus = oldRecord.rows[0].STATUS;
     const oldRecordData = oldRecord.rows[0];
+    if (updateData.is_hf !== undefined) {
+      if (updateData.is_hf === '' || updateData.is_hf === null) {
+        updateData.is_hf = 'FALSE';
+      }
+    }
 
     if (updateData.status) {
       if (!['Approve', 'Cancel', 'Pending'].includes(updateData.status)) {
         return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
       }
     }
-
     if (updateData.top_foil_cu_weight) {
       if (Array.isArray(updateData.top_foil_cu_weight)) {
         updateData.top_foil_cu_weight = updateData.top_foil_cu_weight[0];
       }
 
-      if (!['L', 'H', '1', '2'].includes(updateData.top_foil_cu_weight)) {
+      if (!['L', 'H', '1', '2', 'Z'].includes(updateData.top_foil_cu_weight)) {
         return res.status(400).json({ message: 'Giá trị top_foil_cu_weight không hợp lệ' });
       }
     }
 
-    if (updateData.is_hf && !['TRUE', 'FALSE'].includes(updateData.is_hf)) {
-      return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
+    if (updateData.bot_foil_cu_weight) {
+      if (Array.isArray(updateData.bot_foil_cu_weight)) {
+        updateData.bot_foil_cu_weight = updateData.bot_foil_cu_weight[0];
+      }
+
+      if (!['L', 'H', '1', '2', 'Z'].includes(updateData.bot_foil_cu_weight)) {
+        return res.status(400).json({ message: 'Giá trị bot_foil_cu_weight không hợp lệ' });
+      }
     }
+
 
     const updateFields = [];
     const bindParams = { id };
@@ -779,6 +839,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       dk_55ghz: 'DK_55GHZ_',
       df_55ghz: 'DF_55GHZ_',
       is_hf: 'is_hf',
+      reason: 'reason',
       data_source: 'data_source',
       filename: 'filename'
     };
@@ -821,21 +882,25 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       'dk_55ghz'
     ];
 
-    Object.keys(updateData).forEach(key => {
-      if (updateData[key] !== undefined && columnMapping[key]) {
-        const columnName = columnMapping[key];
-        updateFields.push(`${columnName} = :${key}`);
-        if (key === 'request_date' || key === 'complete_date') {
-          bindParams[key] = updateData[key] ? new Date(updateData[key]) : null;
-        } else if (numericPrecisionFields.includes(key)) {
-          bindParams[key] = safeNumber(updateData[key], 4);
-        } else if (integerFields.includes(key)) {
-          bindParams[key] = safeNumber(updateData[key]);
-        } else {
-          bindParams[key] = updateData[key] || null;
-        }
+   Object.keys(updateData).forEach(key => {
+  if (updateData[key] !== undefined && columnMapping[key]) {
+    const columnName = columnMapping[key];
+    updateFields.push(`${columnName} = :${key}`);
+    if (key === 'request_date' || key === 'complete_date') {
+      bindParams[key] = updateData[key] ? new Date(updateData[key]) : null;
+    } else if (numericPrecisionFields.includes(key)) {
+      bindParams[key] = safeNumber(updateData[key], 4);
+    } else if (integerFields.includes(key)) {
+      bindParams[key] = safeNumber(updateData[key]);
+    } else {
+      if (key === 'is_hf' || key === 'rigid') {
+        bindParams[key] = updateData[key] === 'TRUE' || updateData[key] === true ? 'TRUE' : 'FALSE';
+      } else {
+        bindParams[key] = updateData[key] || null;
       }
-    });
+    }
+  }
+});
 
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có dữ liệu cập nhật' });
@@ -899,21 +964,28 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       });
     }
 
-    // Save history
+    // Save history - include reason in the history data
     try {
+      const historyData = { ...updateData };
+      if (updateData.reason) {
+        historyData.reason = updateData.reason; // Store reason separately in history
+      }
+
       await addHistoryRecord(connection, {
         materialCoreId: id,
         actionType: 'UPDATE',
-        data: updateData,
+        data: historyData,
         createdBy: req.user?.username || 'System'
       });
     } catch (historyError) {
       console.error('Warning: Failed to record history:', historyError);
     }
-    if (oldStatus === 'Approve' && !isOnlyStatusUpdate) {
+
+    // Send email for changes to approved materials (excluding status-only updates)
+    if (oldStatus === 'Approve' && !isStatusOnlyUpdate()) {
       setImmediate(async () => {
         try {
-          // So sánh các giá trị để tìm ra thay đổi
+          // Compare values to find changes
           const changes = [];
           const fieldLabels = {
             requester_name: 'Người yêu cầu',
@@ -924,7 +996,6 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
             prepreg_count: 'Prepreg Count',
             nominal_thickness: 'Nominal Thickness',
             spec_thickness: 'Spec Thickness',
-            preference_class: 'Preference Class',
             use_type: 'Use Type',
             rigid: 'Rigid',
             top_foil_cu_weight: 'Top Foil Cu Weight',
@@ -980,18 +1051,18 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
             df_50ghz: 'DF 50GHz',
             dk_55ghz: 'DK 55GHz',
             df_55ghz: 'DF 55GHz',
-            is_hf: 'Is HF',
+            is_hf: 'IS_HF',
+            reason: 'Lý do',
             data_source: 'Data Source',
             filename: 'Filename'
           };
 
           Object.keys(updateData).forEach(key => {
-            if (key !== 'status' && columnMapping[key]) {
+            if (key !== 'status' && key !== 'reason' && columnMapping[key]) {
               const dbColumnName = columnMapping[key].toUpperCase();
               const oldValue = oldRecordData[dbColumnName];
               const newValue = updateData[key];
 
-              // So sánh giá trị (xử lý cho cả string và number)
               const isChanged = oldValue !== newValue &&
                 !(oldValue == null && (newValue === '' || newValue == null)) &&
                 !(newValue == null && (oldValue === '' || oldValue == null));
@@ -1021,7 +1092,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
                 requester_name: oldRecordData.REQUESTER_NAME,
                 nominal_thickness: oldRecordData.NOMINAL_THICKNESS,
                 top_foil_cu_weight: oldRecordData.TOP_FOIL_CU_WEIGHT,
-                bot_foil_cu_weight: oldRecordData.BOT_FOIL_CU_WEIGHT
+                bot_foil_cu_weight: oldRecordData.BOT_FOIL_CU_WEIGHT,
+                reason: updateData.reason
               }
             );
             let recipients = [...AllEmails];
@@ -1064,6 +1136,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 router.delete('/delete/:id', authenticateToken, checkMaterialCorePermission(['delete']), async (req, res) => {
   let { id } = req.params;
   let connection;
+  const { reason } = req.body;
+
   try {
     if (!id || isNaN(Number(id))) {
       return res.status(400).json({
@@ -1071,32 +1145,127 @@ router.delete('/delete/:id', authenticateToken, checkMaterialCorePermission(['de
       });
     }
     id = Number(id);
+
+    if (!reason) {
+      return res.status(400).json({
+        message: 'Vui lòng nhập lý do xóa',
+        code: 'REASON'
+      });
+    }
+
     connection = await database.getConnection();
-    const result = await connection.execute(
-      `UPDATE material_core SET is_deleted = 1 WHERE id = :id`,
+
+    // Lấy thông tin email của người thực hiện
+    let creatorEmail = null;
+    if (req.user && req.user.userId) {
+      try {
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          creatorEmail = userResult.rows[0].EMAIL;
+        }
+      } catch (userError) {
+        console.error('Error fetching user email:', userError);
+      }
+    }
+
+    // Lấy thông tin material core trước khi xóa để gửi email
+    const materialRecord = await connection.execute(
+      `SELECT * FROM material_core WHERE id = :id AND is_deleted = 0`,
       { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (materialRecord.rows.length === 0) {
+      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
+    }
+
+    const materialData = materialRecord.rows[0];
+
+    const result = await connection.execute(
+      `UPDATE material_core 
+      SET is_deleted = 1, 
+          reason = :reason,
+          deleted_by = :deletedBy,
+          deleted_at = SYSDATE
+      WHERE id = :id`,
+      {
+        id,
+        reason,
+        deletedBy: req.user.username
+      },
       { autoCommit: true }
     );
 
     if (result.rowsAffected > 0) {
-      // Lưu lịch sử
-      await addHistoryRecord(connection, {
-        materialCoreId: id,
-        actionType: 'DELETE',
-        changeDetails: {
-          description: 'Xóa Material Core'
-        },
-        createdBy: req.user.username
-      });
+      // Lưu lịch sử với lý do xóa
+      try {
+        await addHistoryRecord(connection, {
+          materialCoreId: id,
+          actionType: 'DELETE',
+          changeDetails: {
+            description: 'Xóa Material Core',
+            reason: reason // Lưu lý do vào history
+          },
+          createdBy: req.user.username
+        });
+      } catch (historyError) {
+        console.error('Warning: Failed to record history:', historyError);
+      }
     }
 
-    if (result.rowsAffected === 0) {
-      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
-    }
     res.json({
       message: 'Xóa mềm thành công',
       id: id
     });
+
+    // Gửi email thông báo xóa (async) - bao gồm lý do
+    setImmediate(async () => {
+      try {
+        const emailSubject = `[Material System] 🗑️ Yêu cầu xóa Material Core - ${materialData.VENDOR || 'N/A'} | ${materialData.FAMILY || 'N/A'}`;
+        const emailHTML = generateMaterialDeleteEmailHTML(
+          id,
+          req.user?.username || 'System',
+          {
+            vendor: materialData.VENDOR,
+            family: materialData.FAMILY,
+            requester_name: materialData.REQUESTER_NAME,
+            request_date: materialData.REQUEST_DATE,
+            handler: materialData.HANDLER,
+            status: materialData.STATUS,
+            nominal_thickness: materialData.NOMINAL_THICKNESS,
+            spec_thickness: materialData.SPEC_THICKNESS,
+            top_foil_cu_weight: materialData.TOP_FOIL_CU_WEIGHT,
+            bot_foil_cu_weight: materialData.BOT_FOIL_CU_WEIGHT,
+            tg_min: materialData.TG_MIN,
+            tg_max: materialData.TG_MAX,
+            center_glass: materialData.CENTER_GLASS,
+            use_type: materialData.USE_TYPE,
+            rigid: materialData.RIGID,
+            is_hf: materialData.IS_HF,
+            data_source: materialData.DATA_SOURCE,
+            filename: materialData.FILENAME,
+            delete_reason: reason // Thêm lý do xóa vào email
+          }
+        );
+
+        let recipients = [...AllEmails];
+        if (creatorEmail && !recipients.includes(creatorEmail)) {
+          recipients.push(creatorEmail);
+        }
+        recipients = [...new Set(recipients)];
+
+        await sendMailMaterialCore(emailSubject, emailHTML, recipients);
+        console.log(`✅ Email sent successfully for material deletion (ID: ${id})`);
+
+      } catch (emailError) {
+        console.error('❌ Failed to send material deletion email:', emailError);
+      }
+    });
+
   } catch (err) {
     console.error('Error deleting material core:', err);
     res.status(500).json({
@@ -1223,12 +1392,14 @@ function normalizeKeys(obj) {
 function mapExcelKeysToDbKeys(item) {
   const newItem = { ...item };
 
-  // Mapping cụ thể cho các trường đặc biệt
   const columnMapping = {
     'NOMINAL_THICKNESS_': 'NOMINAL_THICKNESS',
     'SPEC_THK_': 'SPEC_THICKNESS',
+    'SPEC_THK': 'SPEC_THICKNESS',
     'DATA_SOURCE_': 'DATA_SOURCE',
     'H_USE_TYPE_': 'USE_TYPE',
+    'PREFERENCE_CLASS_': 'PREFERENCE_CLASS',  // Đã có
+    'CENTER_GLASS_': 'CENTER_GLASS',          // Đã có
     'DK_01G_': 'DK_01G',
     'DF_01G_': 'DF_01G',
     'DK_2_45GHz_': 'DK_2_45GHZ',
@@ -1254,7 +1425,9 @@ function mapExcelKeysToDbKeys(item) {
     'DK_15GHz_': 'DK_15GHZ',
     'DF_15GHz_': 'DF_15GHZ',
     'DK_16GHz_': 'DK_16GHZ',
-    'DF_16GHz_': 'DF_16GHZ'
+    'DF_16GHz_': 'DF_16GHZ',
+    'DK_20GHz_': 'DK_20GHZ',
+    'DF_20GHz_': 'DF_20GHZ'
   };
 
   // Áp dụng mapping
@@ -1274,14 +1447,17 @@ function mapExcelKeysToDbKeys(item) {
   // Chuẩn hóa về lowercase
   const normalized = normalizeKeys(newItem);
 
-  // Xử lý các trường DK/DF có dấu _ cuối nếu cần
-  Object.keys(normalized).forEach(key => {
-    if (/_(ghz)$/.test(key) && !key.endsWith('_ghz_')) {
-      const newKey = key + '_';
-      normalized[newKey] = normalized[key];
-      delete normalized[key];
-    }
-  });
+  // XỬ LÝ PARSE SỐ CHO PREFERENCE_CLASS VÀ CENTER_GLASS
+  // PREFERENCE_CLASS là NUMBER
+  if (normalized.preference_class !== undefined && normalized.preference_class !== null && normalized.preference_class !== '') {
+    const parsed = parseFloat(normalized.preference_class);
+    normalized.preference_class = isNaN(parsed) ? null : parsed;
+  }
+
+  // CENTER_GLASS là VARCHAR2 nhưng cần convert từ số sang string
+  if (normalized.center_glass !== undefined && normalized.center_glass !== null && normalized.center_glass !== '') {
+    normalized.center_glass = String(normalized.center_glass).trim();
+  }
 
   return normalized;
 }
@@ -1367,7 +1543,7 @@ router.post('/import-material-core', authenticateToken, checkMaterialCorePermiss
           df_16ghz: item.df_16ghz,
           dk_20ghz: item.dk_20ghz,
           df_20ghz: item.df_20ghz,
-          is_hf: item.is_hf,
+          is_hf: item.is_hf !== undefined && item.is_hf !== null && item.is_hf !== '' ? item.is_hf : 'FALSE',
           data_source: item.data_source,
           filename: item.filename
         };

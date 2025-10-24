@@ -14,8 +14,10 @@ router.post('/login', async (req, res) => {
   try {
     connection = await database.getConnection();
     
+    // ✅ Thêm AVATAR và EMAIL vào query
     const userCheck = await connection.execute(
-      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED, ROLE, DECODE(ROLE, 'imp', 1, 'bo', 1, 0) AS HAS_SPECIAL_ROLE
+      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED, ROLE, EMAIL, AVATAR,
+              DECODE(ROLE, 'imp', 1, 'bo', 1, 0) AS HAS_SPECIAL_ROLE
        FROM users 
        WHERE COMPANY_ID = :company_id`,
       { company_id },
@@ -25,25 +27,29 @@ router.post('/login', async (req, res) => {
     if (userCheck.rows.length === 0) {
       return res.status(401).json({ message: 'ID công ty hoặc mật khẩu không đúng' });
     }
+    
     const user = userCheck.rows[0];
-    // Check if account is disabled
+    
     if (user.IS_DELETED === 1) {
       return res.status(403).json({ message: 'Tài khoản của bạn đã bị vô hiệu hóa' });
     }
-    // Check password_hash without trim()
+    
     if (password_hash !== user.PASSWORD_HASH) {
       return res.status(401).json({ 
         message: 'ID công ty hoặc mật khẩu không đúng'
       });
     }
 
-    // Generate token and complete login
+    // ✅ Thêm email và avatar vào userPayload
     const userPayload = {
-      username: user.USERNAME,
       userId: user.USER_ID,
+      username: user.USERNAME,
       company_id: user.COMPANY_ID.trim(),
-      role: user.ROLE
+      role: user.ROLE,
+      email: user.EMAIL,
+      avatar: user.AVATAR  // ✅ Thêm avatar
     };
+    
     const accessToken = jwt.sign(userPayload, process.env.JWT_SECRET, { expiresIn: '24h' });
     const refreshToken = jwt.sign(userPayload, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, { expiresIn: '30d' });
 
@@ -51,7 +57,7 @@ router.post('/login', async (req, res) => {
       message: 'Đăng nhập thành công',
       accessToken,
       refreshToken,
-      user: userPayload
+      user: userPayload  // ✅ user object đã có avatar
     });
   } catch (error) {
     console.error('Error during login:', error);
@@ -119,7 +125,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
   try {
     connection = await database.getConnection();
     const result = await connection.execute(
-      `SELECT username, company_id, role FROM users WHERE company_id = :company_id`,
+      `SELECT username, company_id, role, department FROM users WHERE company_id = :company_id`,
       { company_id: req.user.company_id },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -132,7 +138,8 @@ router.get('/profile', authenticateToken, async (req, res) => {
     res.json({
       username: user.USERNAME,
       company_id: user.COMPANY_ID.trim(),
-      role: user.ROLE
+      role: user.ROLE,
+      department: user.DEPARTMENT
     });
   } catch (error) {
     console.error('Error fetching profile:', error);

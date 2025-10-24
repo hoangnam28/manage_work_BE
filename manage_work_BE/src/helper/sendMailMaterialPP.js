@@ -24,6 +24,7 @@ async function sendMailMaterialPP(subject, html, toList) {
     transporter.sendMail(mailOptions);
 }
 
+
 // Hàm tạo nội dung HTML cho email tạo mới 
 function generateCreateMaterialEmailHTML(materialData, createdRecords) {
     // ✅ Xác định tiêu đề dựa trên trạng thái
@@ -39,7 +40,16 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
                 return '🆕 Thông báo tạo mới Material PP';
         }
     };
-
+     const formatDateTime = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
     const recordsHTML = createdRecords.map((record, index) => `
         <tr>
             <td style="border: 1px solid #ddd; padding: 8px;">${record.vendor || 'N/A'}</td>
@@ -68,7 +78,7 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Ngày yêu cầu:</td>
-                        <td>${materialData.request_date ? new Date(materialData.request_date).toLocaleDateString('vi-VN') : 'N/A'}</td>
+                        <td>${materialData.request_date ? new formatDateTime(materialData.request_date) : 'N/A'}</td>
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Trạng thái:</td>
@@ -104,7 +114,14 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
                     </tbody>
                 </table>
             </div>
-
+             <div style="margin-top: 20px; text-align: center;">
+            <a href="http://192.84.105.173:8888/material-properties"
+               style="display: inline-block; margin: 5px;
+                      background: #1890ff; color: #fff; text-decoration: none;
+                      padding: 8px 14px; border-radius: 4px; font-weight: bold; font-size: 13px;">
+              Xem chi tiết 
+            </a>
+            </div>
             <div style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
                 <p style="margin: 0; font-size: 14px; color: #6c757d;">
                     <strong>Lưu ý:</strong> Đây là email thông báo tự động từ hệ thống Material Management System.
@@ -148,7 +165,16 @@ function generateStatusUpdateEmailHTML(materialId, oldStatus, newStatus, updated
     };
 
     const statusInfo = getStatusInfo(newStatus);
-
+    const formatDateTime = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
     return `
         <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
             <h2 style="color: #2c5aa0; border-bottom: 2px solid #2c5aa0; padding-bottom: 10px;">
@@ -172,7 +198,7 @@ function generateStatusUpdateEmailHTML(materialId, oldStatus, newStatus, updated
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Thời gian:</td>
-                        <td>${new Date().toLocaleString('vi-VN')}</td>
+                        <td>${formatDateTime(new Date())}</td>
                     </tr>
                 </table>
             </div>
@@ -213,6 +239,16 @@ function generateStatusUpdateEmailHTML(materialId, oldStatus, newStatus, updated
     `;
 }
 function generateMaterialChangeEmailHTML(materialId, changes, updatedBy, materialInfo = {}) {
+     const formatDateTime = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
     const changesHTML = changes.map(change => `
         <tr>
             <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold; background-color: #f8f9fa;">${change.field}</td>
@@ -252,7 +288,7 @@ function generateMaterialChangeEmailHTML(materialId, changes, updatedBy, materia
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Thời gian thay đổi:</td>
-                        <td>${new Date().toLocaleString('vi-VN')}</td>
+                        <td>${formatDateTime(new Date())}</td>
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Số thay đổi:</td>
@@ -323,9 +359,62 @@ function generateMaterialChangeEmailHTML(materialId, changes, updatedBy, materia
     `;
 }
 
+function generateMaterialDeleteEmailHTML(deletedBy, materialInfo = {}) {
+     const formatDateTime = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
+    return `
+        <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+            <h2 style="color: #dc3545; border-bottom: 2px solid #dc3545; padding-bottom: 10px;">
+                🗑️ Yêu cầu xóa vật liệu 
+            </h2>
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                <h3 style="color: #333; margin-top: 0;">Thông tin xóa vật liệu:</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <td style="padding: 5px 0; font-weight: bold; width: 200px;">Vendor:</td>
+                        <td>${materialInfo.VENDOR || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px 0; font-weight: bold;">Family:</td>
+                        <td>${materialInfo.FAMILY || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px 0; font-weight: bold;">Resin Percentage:</td>
+                        <td>${materialInfo.RESIN_PERCENTAGE || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px 0; font-weight: bold;">Xóa bởi:</td>
+                        <td>${deletedBy}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px 0; font-weight: bold;">Thời gian xóa:</td>
+                        <td>${formatDateTime(new Date())}</td>
+                    </tr>
+                </table>
+            </div>
+            
+            <div style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+                <p style="margin: 0; font-size: 14px; color: #6c757d;">
+                    <strong>Lưu ý:</strong> Đây là email thông báo tự động từ hệ thống Material Management System.
+                    Vui lòng không trả lời email này.
+                </p>
+            </div>
+        </div>
+    `;
+}
+
 module.exports = {
     sendMailMaterialPP,
     generateCreateMaterialEmailHTML,
     generateStatusUpdateEmailHTML,
-    generateMaterialChangeEmailHTML
+    generateMaterialChangeEmailHTML,
+    generateMaterialDeleteEmailHTML
 };

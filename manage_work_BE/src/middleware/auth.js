@@ -85,24 +85,6 @@ const authenticateToken = (req, res, next) => {
   });
 };
 
-const checkEditPermission = async (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({ 
-      message: 'Vui lòng đăng nhập lại',
-      code: 'USER_NOT_AUTHENTICATED'
-    });
-  }
-
-  if (
-    req.user.company_id !== '021253' &&
-    req.user.company_id !== '000001') {
-    return res.status(403).json({ 
-      message: 'Bạn không có quyền thực hiện thao tác này',
-      code: 'INSUFFICIENT_PERMISSIONS'
-    });
-  }
-  next();
-};
 
 // Thêm middleware để kiểm tra role
 const checkRole = (allowedRoles) => {
@@ -145,7 +127,7 @@ const handleRefreshToken = async (req, res) => {
   }
 
   try {
-    const result = refreshAccessToken(refreshToken);
+    const result = await refreshAccessToken(refreshToken);
     res.json(result);
   } catch (error) {
     console.error('Refresh token error:', error);
@@ -228,7 +210,6 @@ const checkMaterialCorePermission = (requiredActions = []) => {
 
 module.exports = {
   authenticateToken,
-  checkEditPermission,
   checkRole,
   checkMaterialCorePermission, 
   generateAccessToken,

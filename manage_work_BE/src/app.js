@@ -15,10 +15,22 @@ const { router: materialCoreHistoryRouter } = require('./routes/material-core-hi
 const { router: materialPPHistoryRoutes } = require('./routes/material-pp-history');
 const { router: materialNewHistoryRoutes } = require('./routes/material-new-history');
 const ulMaterial = require('./routes/ul');
-const ulCertificationRoutes = require('./routes/ul-certification');
+const materialCertificationRoutes = require('./routes/material-certification');
+const timeTrackingRoutes = require('./routes/time-tracking');
+const inkManagementRoutes = require('./routes/ink-management');
+const bussinessRotes = require('./routes/bussiness');
+const projectRoutes = require('./routes/project');
+const taskRoutes = require('./routes/task');
+const dashboardRoutes = require('./routes/dashboard');
+const settingRoutes = require('./routes/setting');
 const path = require('path');
 const fs = require('fs');
 const app = express();
+
+// ===== THÊM DÒNG NÀY ĐỂ KHỞI ĐỘNG CRON JOB =====
+require('./helper/cronJobs');
+console.log('📅 Email reminder cron job has been initialized');
+// ===============================================
 
 const allowedOrigins = ['http://localhost:8888', 'http://192.84.105.173:8888'];
 app.use(cors({
@@ -72,7 +84,21 @@ app.use('/api/material-new-history', materialNewHistoryRoutes);
 
 app.use('/api/ul', ulMaterial);
 
-app.use('/api/ul-certification', ulCertificationRoutes);
+app.use('/api/material-certification', materialCertificationRoutes);
+
+app.use('/api/time-tracking', timeTrackingRoutes);
+
+app.use('/api/ink-management', inkManagementRoutes);
+
+app.use('/api/bussiness', bussinessRotes);
+
+app.use('/api/dashboard', dashboardRoutes);
+
+app.use('/api/projects', projectRoutes);
+
+app.use('/api/tasks', taskRoutes);
+
+app.use('/api/settings', settingRoutes);
 
 const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
@@ -90,4 +116,7 @@ process.on('SIGINT', async () => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`📧 Email reminder system is active - will run daily at 9:15 AM (Asia/Ho_Chi_Minh)`);
+});

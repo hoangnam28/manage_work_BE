@@ -10,12 +10,13 @@ const {
   generateCreateMaterialEmailHTML,
   generateStatusUpdateEmailHTML,
   generateMaterialChangeEmailHTML,
+  generateMaterialDeleteEmailHTML,
   sendMailMaterialPP
 } = require('../helper/sendMailMaterialPP');
 
 const AllEmails = [
   'trang.nguyenkieu@meiko-elec.com',
-  'thuy.nguyen2@meiko-elec.com'
+  'thanh.vutien@meiko-elec.com'
 ];
 
 const {
@@ -62,14 +63,14 @@ router.get('/list', authenticateToken, checkMaterialCorePermission(['view']), as
 
     // Tạo WHERE clause với điều kiện tìm kiếm
     const searchWhere = searchConditions.length > 0
-      ? `AND ${searchConditions.join(' AND ')}`
+      ? `WHERE ${searchConditions.join(' AND ')}`
       : '';
 
     // Query để đếm tổng số records
     const countQuery = `
       SELECT COUNT(*) as total 
       FROM material_properties
-      WHERE is_deleted = 0 ${searchWhere}
+      ${searchWhere}
     `;
 
     // Xây dựng query chính với pagination
@@ -131,9 +132,10 @@ router.get('/list', authenticateToken, checkMaterialCorePermission(['view']), as
         DK_20GHZ_ as dk_20ghz,
         DF_20GHZ_ as df_20ghz,
         DK_25GHZ_ as dk_25ghz,
-        DF_25GHZ_ as df_25ghz
+        DF_25GHZ_ as df_25ghz,
+        reason,
+        is_deleted
        FROM material_properties
-       WHERE is_deleted = 0
           ${searchWhere}
         ) a
       ) WHERE row_num > :offset AND row_num <= :limit`;
@@ -145,7 +147,6 @@ router.get('/list', authenticateToken, checkMaterialCorePermission(['view']), as
       ...searchBindings // Thêm các bind parameters cho điều kiện tìm kiếm
     };
 
-    // Thực hiện cả 2 query song song với cùng một bộ params
     const [countResult, dataResult] = await Promise.all([
       connection.execute(countQuery, searchBindings, { outFormat: oracledb.OUT_FORMAT_OBJECT }),
       connection.execute(mainQuery, queryParams, { outFormat: oracledb.OUT_FORMAT_OBJECT })
@@ -434,12 +435,14 @@ router.post('/create', authenticateToken, checkMaterialCorePermission(['create']
   }
 });
 
-// Cập nhật material core
+// Cập nhật material   core
 router.put('/update/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
   let connection;
-  const isStatusUpdate = updateData.status && Object.keys(updateData).length <= 3;
+  const isStatusUpdate = updateData.status && Object.keys(updateData).filter(key =>
+    key !== 'status' && key !== 'complete_date' && key !== 'id'
+  ).length === 0;
   if (isStatusUpdate) {
     // Chỉ admin mới có thể approve/cancel
     const hasApprovePermission = checkMaterialCorePermission(['approve']);
@@ -460,6 +463,21 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       return res.status(403).json({
         message: 'Bạn không có quyền chỉnh sửa',
         code: 'INSUFFICIENT_PERMISSIONS'
+      });
+    }
+     // Require reason for all non-status-only updates
+    if (!updateData.reason || updateData.reason.trim() === '') {
+      return res.status(400).json({
+        message: 'Vui lòng nhập lý do cập nhật',
+        code: 'REASON_REQUIRED'
+      });
+    }
+
+    // Validate reason length (optional but recommended)
+    if (updateData.reason.trim().length < 5) {
+      return res.status(400).json({
+        message: 'Lý do cập nhật phải có ít nhất 5 ký tự',
+        code: 'REASON_TOO_SHORT'
       });
     }
   }
@@ -497,17 +515,15 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
     if (oldRecord.rows.length === 0) {
       return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
     }
+    if (updateData.is_hf && !['TRUE', 'FALSE'].includes(updateData.is_hf)) {
+      return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
+    }
 
     const oldStatus = oldRecord.rows[0].STATUS;
     const oldRecordData = oldRecord.rows[0];
     if (updateData.status && !['Approve', 'Cancel', 'Pending'].includes(updateData.status)) {
       return res.status(400).json({ message: 'Trạng thái không hợp lệ' });
     }
-
-    if (updateData.is_hf && !['TRUE', 'FALSE'].includes(updateData.is_hf)) {
-      return res.status(400).json({ message: 'Giá trị is_hf không hợp lệ' });
-    }
-
     if (updateData.status) {
       const oldResult = await connection.execute(
         `SELECT status, vendor, family, name FROM material_properties WHERE id = :id`,
@@ -573,7 +589,8 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       df_25ghz: 'DF_25GHZ_',
       is_hf: 'is_hf',
       data_source: 'data_source',
-      filename: 'filename'
+      filename: 'filename',
+      reason: 'reason'
     };
 
     const safeNumber = (value, precision = null) => {
@@ -642,7 +659,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
 
-    // ✅ SỬA: Kiểm tra và gửi email khi trạng thái thay đổi
+
     if (updateData.status && oldStatus && updateData.status !== oldStatus) {
       // ✅ Sử dụng setImmediate để gửi email sau khi response đã được gửi
       setImmediate(async () => {
@@ -677,19 +694,25 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
       });
     }
 
-    // Ghi lại lịch sử
+    try {
+      const historyData = { ...updateData };
+      if (updateData.reason) {
+        historyData.reason = updateData.reason; // Store reason separately in history
+    }
     await addHistoryPpRecord(connection, {
       materialPpId: id,
       actionType: 'UPDATE',
       data: updateData,
       createdBy: req.user.username
     });
+    } catch (historyError) {
+      console.error('Warning: Failed to record history:', historyError);
+    }
     if (oldStatus === 'Approve' && !isOnlyStatusUpdate) {
-      setImmediate(async () => {
-        try {
-          // So sánh các giá trị để tìm ra thay đổi
-          const changes = [];
-          const fieldLabels = {
+    setImmediate(async () => {
+    try {
+      const changes = [];
+      const fieldLabels = {
             name: 'Người yêu cầu',
             request_date: 'Ngày yêu cầu',
             handler: 'Người xử lý',
@@ -739,36 +762,36 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
             dk_25ghz: 'DK 25GHz',
             df_25ghz: 'DF 25GHz',
             is_hf: 'Is HF',
+            reason: 'Lý do',
             data_source: 'Data Source',
             filename: 'Filename'
           };
 
           Object.keys(updateData).forEach(key => {
-            if (key !== 'status' && columnMapping[key]) {
-              const dbColumnName = columnMapping[key].toUpperCase();
-              const oldValue = oldRecordData[dbColumnName];
-              const newValue = updateData[key];
+        if (key !== 'status' && key !== 'reason' && columnMapping[key]) {
+          const dbColumnName = columnMapping[key].toUpperCase();
+          const oldValue = oldRecordData[dbColumnName];
+          const newValue = updateData[key];
 
-              // So sánh giá trị (xử lý cho cả string và number)
-              const isChanged = oldValue !== newValue &&
-                !(oldValue == null && (newValue === '' || newValue == null)) &&
-                !(newValue == null && (oldValue === '' || oldValue == null));
+          const isChanged = oldValue !== newValue &&
+            !(oldValue == null && (newValue === '' || newValue == null)) &&
+            !(newValue == null && (oldValue === '' || oldValue == null));
 
-              if (isChanged) {
-                changes.push({
-                  field: fieldLabels[key] || key,
-                  fieldKey: key,
-                  oldValue: oldValue || 'Không có',
-                  newValue: newValue || 'Không có'
-                });
-              }
-            }
-          });
+          if (isChanged) {
+            changes.push({
+              field: fieldLabels[key] || key,
+              fieldKey: key,
+              oldValue: oldValue || 'Không có',
+              newValue: newValue || 'Không có'
+            });
+          }
+        }
+      });
 
           if (changes.length > 0) {
             console.log(`Found ${changes.length} changes for approved material ID: ${id}`);
 
-            const emailSubject = `[Material System] ⚠️ Thay đổi dữ liệu Material PP đã được cập nhật ${VENDOR}`;
+            const emailSubject = `[Material System] ⚠️ Thay đổi dữ liệu Material PP đã được cập nhật ${oldRecordData.VENDOR}`;
             const emailHTML = generateMaterialChangeEmailHTML(
               id,
               changes,
@@ -782,7 +805,7 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
                 useType: oldRecordData.USE_TYPE || 'N/A',
                 ppType: oldRecordData.PP_TYPE || 'N/A',
                 tgMin: oldRecordData.TG_MIN || 'N/A',
-
+                reason: updateData.reason
               }
             );
             let recipients = [...AllEmails];
@@ -824,17 +847,59 @@ router.put('/update/:id', authenticateToken, async (req, res) => {
 router.delete('/delete/:id', authenticateToken, checkMaterialCorePermission(['delete']), async (req, res) => {
   let { id } = req.params;
   let connection;
+  const { reason } = req.body;
   try {
     if (!id || isNaN(Number(id))) {
       return res.status(400).json({
         message: 'ID không hợp lệ'
       });
     }
+    if (!reason) {
+      return res.status(400).json({
+        message: 'Vui lòng nhập lý do xóa',
+        code: 'REASON'
+      });
+    }
     id = Number(id);
     connection = await database.getConnection();
-    const result = await connection.execute(
-      `UPDATE material_properties SET is_deleted = 1 WHERE id = :id`,
+    let creatorEmail = null;
+    if (req.user && req.user.userId) {
+      try{
+        const userResult = await connection.execute(
+          `SELECT email FROM users WHERE user_id = :userId AND is_deleted = 0`,
+          { userId: req.user.userId },
+          { outFormat: oracledb.OUT_FORMAT_OBJECT }
+        );
+        if (userResult.rows.length > 0) {
+          creatorEmail = userResult.rows[0].EMAIL;
+        }
+      }catch(userError){
+        console.error('Error fetching user email:', userError);
+      }
+    }
+
+    const materialResult = await connection.execute(
+      `SELECT * FROM material_properties WHERE id = :id AND is_deleted = 0`,
       { id },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if(materialResult.rows.length === 0){
+      return res.status(404).json({ message: 'Không tìm thấy bản ghi' });
+    }
+    const materialData = materialResult.rows[0];
+   const result = await connection.execute(
+      `UPDATE material_properties 
+      SET is_deleted = 1, 
+          reason = :reason,
+          deleted_by = :deletedBy,
+          deleted_at = SYSDATE
+      WHERE id = :id`,
+      { 
+        id, 
+        reason,
+        deletedBy: req.user.username 
+      },
       { autoCommit: true }
     );
     if (result.rowsAffected > 0) {
@@ -854,6 +919,33 @@ router.delete('/delete/:id', authenticateToken, checkMaterialCorePermission(['de
     res.json({
       message: 'Xóa mềm thành công',
       id: id
+    });
+    setImmediate(async () => {
+      try {
+        const emailSubject = `[Material System] 🗑️ Yêu cầu xóa Material PP  - ${materialData.VENDOR || 'N/A'} | ${materialData.FAMILY || 'N/A'}`;
+        // ✅ Sửa - đúng thứ tự tham số theo function definition
+        const emailHTML = generateMaterialDeleteEmailHTML(req.user?.username || 'System', {
+          VENDOR: materialData.VENDOR,
+          FAMILY: materialData.FAMILY,
+          NAME: materialData.NAME,
+          RESIN_PERCENTAGE: materialData.RESIN_PERCENTAGE,
+          PREFERENCE_CLASS: materialData.PREFERENCE_CLASS,
+          USE_TYPE: materialData.USE_TYPE,
+          PP_TYPE: materialData.PP_TYPE,
+          TG_MIN: materialData.TG_MIN,
+          TG_MAX: materialData.TG_MAX
+        });
+        let recipients = [...AllEmails];
+        if (creatorEmail && !recipients.includes(creatorEmail)) {
+          recipients.push(creatorEmail);
+        }
+        recipients = [...new Set(recipients)];
+
+        await sendMailMaterialPP(emailSubject, emailHTML, recipients);
+        console.log('Email notification sent successfully for material deletion');
+      } catch (emailError) {
+        console.error('Warning: Failed to send delete notification email:', emailError);
+      }
     });
   } catch (err) {
     console.error('Error deleting material core:', err);

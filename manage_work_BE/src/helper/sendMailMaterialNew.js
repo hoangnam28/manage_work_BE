@@ -119,7 +119,14 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
                     </tbody>
                 </table>
             </div>
-
+             <div style="margin-top: 20px; text-align: center;">
+                <a href="http://192.84.105.173:8888/material-new"
+                   style="display: inline-block; margin: 5px;
+                          background: #1890ff; color: #fff; text-decoration: none;
+                          padding: 8px 14px; border-radius: 4px; font-weight: bold; font-size: 13px;">
+                  Xem chi tiết 
+                </a>
+            </div>
             <div style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
                 <p style="margin: 0; font-size: 14px; color: #6c757d;">
                     <strong>Lưu ý:</strong> Đây là email thông báo tự động từ hệ thống Material Management System.

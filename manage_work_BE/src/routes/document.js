@@ -5,11 +5,6 @@ const database = require('../config/database');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const {
-  generateNewReviewHTML,
-  generateUpdateDeadlineHTML,
-  sendMail } = require('../helper/sendMailRemind');
-
 
 oracledb.fetchAsBuffer = [oracledb.BLOB];
 oracledb.autoCommit = true;
@@ -17,6 +12,7 @@ const uploadDir = path.join(__dirname, '../../uploads');
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, { recursive: true });
 }
+const moment = require('moment-timezone');
 
 router.post('/add', async (req, res) => {
   const { ma, khach_hang, ma_tai_lieu, doi_tuong = null, ky_han, created_by } = req.body;
@@ -31,7 +27,9 @@ router.post('/add', async (req, res) => {
     const stt = seqResult.rows[0][0];
 
     // Format the date for Oracle
-    const kyHanDate = ky_han ? new Date(ky_han) : null;
+    const kyHanDateStr = ky_han
+  ? moment(ky_han).tz("Asia/Ho_Chi_Minh").format("YYYY-MM-DD HH:mm:ss")
+  : null;
 
     const result = await connection.execute(
       `INSERT INTO document_columns (
@@ -48,24 +46,12 @@ router.post('/add', async (req, res) => {
         khach_hang,
         ma_tai_lieu,
         doi_tuong,
-        ky_han: kyHanDate ? kyHanDate.toISOString().replace('T', ' ').split('.')[0] : null,
+        ky_han: kyHanDateStr,
         created_by
       },
       { autoCommit: true }
     );
-    // Gửi mail thông báo tạo mới
-    await sendMail(
-      'Thông báo: Review tài liệu mới được tạo',
-      generateNewReviewHTML({
-        stt,
-        ma,
-        khach_hang,
-        ma_tai_lieu,
-        ky_han,
-        created_by
-      }),
-      null
-    );
+    // Đã bỏ gửi mail thông báo tạo mới
 
     res.json({
       message: 'Thêm dữ liệu thành công',
@@ -159,26 +145,6 @@ router.put('/update/:column_id', async (req, res) => {
     console.log('newKyHan (formatted):', newKyHan);
     console.log('Are they equal?', oldKyHan === newKyHan);
 
-    // Chỉ gửi mail khi kỳ hạn thực sự thay đổi
-    if (oldKyHan !== newKyHan) {
-      console.log('✉️ SENDING EMAIL - Kỳ hạn đã thay đổi:', oldKyHan, '->', newKyHan);
-
-      // Gửi mail thông báo cập nhật kỳ hạn
-      await sendMail(
-        'Thông báo: Cập nhật kỳ hạn Review task',
-        generateUpdateDeadlineHTML({
-          ma: data.ma,
-          khach_hang: data.khach_hang,
-          ma_tai_lieu: data.ma_tai_lieu,
-          old_ky_han: oldData.KY_HAN,
-          new_ky_han: data.ky_han,
-          edited_by
-        }),
-        null
-      );
-    } else {
-      console.log('✅ NO EMAIL - Kỳ hạn không thay đổi');
-    }
     for (const [field, newValue] of Object.entries(data)) {
       if (field !== 'edited_by') {
         const oldValue = oldData[field.toUpperCase()];

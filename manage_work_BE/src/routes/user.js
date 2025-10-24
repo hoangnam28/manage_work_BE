@@ -3,10 +3,50 @@ const router = express.Router();
 const oracledb = require('oracledb');
 const database = require('../config/database');
 const jwt = require('jsonwebtoken');
-const e = require('express');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
-// Middleware xác thực token
+// Tạo thư mục uploads nếu chưa tồn tại
+const uploadDir = path.join(__dirname, '../../uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+// Cấu hình multer để upload file
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, uploadDir);
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  // Chỉ chấp nhận file ảnh
+  const allowedTypes = /jpeg|jpg|png|gif|webp/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+
+  if (mimetype && extname) {
+    return cb(null, true);
+  } else {
+    cb(new Error('Chỉ chấp nhận file ảnh (jpeg, jpg, png, gif, webp)'));
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // Giới hạn 5MB
+  },
+  fileFilter: fileFilter
+});
+
+
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -59,13 +99,33 @@ const checkAdminPermission = async (req, res, next) => {
   }
 };
 
+
+router.post('/upload-avatar', authenticateToken, upload.single('avatar'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: 'Không tìm thấy file' });
+    }
+
+    const avatarUrl = `/uploads/${req.file.filename}`;
+
+    res.json({
+      message: 'Upload avatar thành công',
+      url: avatarUrl,
+      filename: req.file.filename
+    });
+  } catch (error) {
+    console.error('Error uploading avatar:', error);
+    res.status(500).json({ message: 'Lỗi khi upload avatar', error: error.message });
+  }
+});
+
 // Lấy danh sách tất cả users
 router.get('/list', authenticateToken, checkAdminPermission, async (req, res) => {
   let connection;
   try {
     connection = await database.getConnection();
     const result = await connection.execute(
-      `SELECT USER_ID, USERNAME, COMPANY_ID, CREATED_AT, DEPARTMENT, AVATAR, ROLE
+      `SELECT USER_ID, USERNAME, COMPANY_ID, CREATED_AT, DEPARTMENT, AVATAR, ROLE, EMAIL
        FROM users
        WHERE IS_DELETED = 0
        ORDER BY USER_ID ASC`,
@@ -92,7 +152,7 @@ router.get('/list', authenticateToken, checkAdminPermission, async (req, res) =>
 
 // Tạo user mới
 router.post('/create', authenticateToken, checkAdminPermission, async (req, res) => {
-  const { username, company_id, password_hash, department, role, email } = req.body;
+  const { username, company_id, password_hash, department, role, email, avatar } = req.body;
   let connection;
 
   try {
@@ -105,7 +165,6 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
     const validRoles = ['admin', 'editor', 'viewer', 'imp', 'bo'];
     let roleStr = '';
     if (Array.isArray(role)) {
-      // FE gửi lên là mảng
       for (const r of role) {
         if (!validRoles.includes(r)) {
           return res.status(400).json({ message: 'Role không hợp lệ' });
@@ -113,7 +172,6 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
       }
       roleStr = role.join(',');
     } else if (typeof role === 'string') {
-      // FE gửi lên là chuỗi (1 hoặc nhiều role, phân cách dấu phẩy)
       const rolesArr = role.split(',').map(r => r.trim()).filter(Boolean);
       for (const r of rolesArr) {
         if (!validRoles.includes(r)) {
@@ -149,8 +207,8 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
 
     // Insert new user
     await connection.execute(
-      `INSERT INTO users (USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, DEPARTMENT, CREATED_AT, ROLE, EMAIL)
-       VALUES (:user_id, :username, :company_id, :password_hash, :department, SYSDATE, :role, :email)`,
+      `INSERT INTO users (USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, DEPARTMENT, CREATED_AT, ROLE, EMAIL, AVATAR)
+       VALUES (:user_id, :username, :company_id, :password_hash, :department, SYSDATE, :role, :email, :avatar)`,
       {
         user_id: nextId,
         username: username.trim(),
@@ -158,7 +216,8 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
         password_hash: password_hash.trim(),
         department: department ? department.trim() : null,
         role: roleStr,
-        email: email.trim() || null,
+        email: email ? email.trim() : null,
+        avatar: avatar || null
       },
       { autoCommit: true }
     );
@@ -166,17 +225,18 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
     res.json({
       message: 'Tạo user thành công',
       data: {
-        user_id: nextId,
-        username: username.trim(),
-        company_id: company_id.trim(),
-        department: department,
-        role: roleStr,
-        email: email
+        USER_ID: nextId,
+        USERNAME: username.trim(),
+        COMPANY_ID: company_id.trim(),
+        DEPARTMENT: department,
+        ROLE: roleStr,
+        EMAIL: email,
+        AVATAR: avatar || null
       }
     });
   } catch (error) {
     console.error('Error creating user:', error);
-    res.status(500).json({ message: 'Lỗi server' });
+    res.status(500).json({ message: 'Lỗi server', error: error.message });
   } finally {
     if (connection) {
       try {
@@ -189,15 +249,16 @@ router.post('/create', authenticateToken, checkAdminPermission, async (req, res)
 });
 
 // Cập nhật thông tin user
-router.put('/update/:userId', authenticateToken, checkAdminPermission, async (req, res) => {
+router.put('/update/:userId', authenticateToken, async (req, res) => {
   const { userId } = req.params;
-  const { username, password_hash, role, email } = req.body;
+  const { username, password_hash, role, email, department, avatar } = req.body;
+  
   let connection;
 
   try {
     connection = await database.getConnection();
     const userExists = await connection.execute(
-      `SELECT USERNAME, PASSWORD_HASH, ROLE, EMAIL FROM users 
+      `SELECT USERNAME, PASSWORD_HASH, ROLE, EMAIL, DEPARTMENT, AVATAR FROM users 
        WHERE USER_ID = :user_id AND IS_DELETED = 0`,
       { user_id: userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -261,10 +322,30 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
       updateFields.push('ROLE = :role');
       bindParams.role = roleStr;
     }
+
     if (email !== undefined) {
       updateFields.push('EMAIL = :email');
       bindParams.email = email;
     }
+
+    if (department !== undefined) {
+      updateFields.push('DEPARTMENT = :department');
+      bindParams.department = department;
+    }
+
+    if (avatar !== undefined) {
+  updateFields.push('AVATAR = :avatar');
+  bindParams.avatar = avatar;
+  
+  // Xóa avatar cũ nếu có
+  const oldAvatar = userExists.rows[0].AVATAR;
+  if (oldAvatar && oldAvatar !== avatar) {
+    const oldAvatarPath = path.join(__dirname, '..', oldAvatar);
+    if (fs.existsSync(oldAvatarPath)) {
+      fs.unlinkSync(oldAvatarPath);
+    }
+  }
+}
 
     if (updateFields.length === 0) {
       return res.status(400).json({ message: 'Không có thông tin nào được cập nhật' });
@@ -277,10 +358,10 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
       AND IS_DELETED = 0
     `;
 
-    const result = await connection.execute(updateQuery, bindParams, { autoCommit: true });
+    await connection.execute(updateQuery, bindParams, { autoCommit: true });
 
     const updatedUser = await connection.execute(
-      `SELECT USER_ID, USERNAME, ROLE FROM users WHERE USER_ID = :user_id`,
+      `SELECT USER_ID, USERNAME, ROLE, EMAIL, DEPARTMENT, AVATAR FROM users WHERE USER_ID = :user_id`,
       { user_id: userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -303,6 +384,8 @@ router.put('/update/:userId', authenticateToken, checkAdminPermission, async (re
     }
   }
 });
+
+// Xóa user (soft delete)
 router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async (req, res) => {
   const { userId } = req.params;
   let connection;
@@ -319,7 +402,6 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
     if (checkResult.rows[0].COUNT === 0) {
       return res.status(404).json({ message: 'Không tìm thấy user hoặc user đã bị xóa' });
     }
-
 
     await connection.execute(
       `UPDATE users 
@@ -347,61 +429,5 @@ router.delete('/delete/:userId', authenticateToken, checkAdminPermission, async 
   }
 });
 
-// Đăng nhập
-router.post('/login', async (req, res) => {
-  const { company_id, password } = req.body;
-  let connection;
-
-  try {
-    connection = await database.getConnection();
-    const userCheck = await connection.execute(
-      `SELECT USER_ID, USERNAME, COMPANY_ID, PASSWORD_HASH, IS_DELETED, ROLE, EMAIL
-       FROM users 
-       WHERE TRIM(COMPANY_ID) = :company_id AND IS_DELETED = 0`,
-      { company_id }
-    );
-    const user = userCheck.rows[0];
-    if (!user) {
-      return res.status(401).json({ message: 'ID công ty hoặc mật khẩu không đúng' });
-    }
-    if (password !== user.PASSWORD_HASH) {
-      return res.status(401).json({ message: 'ID công ty hoặc mật khẩu không đúng' });
-    }
-
-    // Tạo token
-    const userPayload = {
-      userId: user.USER_ID,
-      username: user.USERNAME,
-      company_id: user.COMPANY_ID.trim(),
-      role: user.ROLE,
-      email: user.EMAIL
-    };
-
-    const token = jwt.sign(userPayload, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-    res.json({
-      message: 'Đăng nhập thành công',
-      data: {
-        token: token,
-        user_id: user.USER_ID,
-        username: user.USERNAME,
-        company_id: user.COMPANY_ID,
-        role: user.ROLE,
-        email: user.EMAIL
-      }
-    });
-  } catch (error) {
-    console.error('Error logging in:', error);
-    res.status(500).json({ message: 'Lỗi server', error: error.message });
-  } finally {
-    if (connection) {
-      try {
-        await connection.close();
-      } catch (err) {
-        console.error('Error closing connection:', err);
-      }
-    }
-  }
-});
 
 module.exports = router;

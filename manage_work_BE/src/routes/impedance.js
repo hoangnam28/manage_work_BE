@@ -33,10 +33,15 @@ const checkEditPermission = async (req, res, next) => {
   let connection;
   try {
     connection = await database.getConnection();
-    // Kiểm tra role 'imp' cho phép xem/sửa Impedance
-    if (req.user.role !== 'imp') {
-      return res.status(403).json({ message: 'Bạn không có quyền thực hiện thao tác này' });
+
+    const userRoles = req.user.role ? req.user.role.split(',').map(r => r.trim()) : [];
+    
+    if (!userRoles.includes('imp')) {
+      return res.status(403).json({ 
+        message: 'Bạn không có quyền thực hiện thao tác này. Cần có quyền Impedance.' 
+      });
     }
+    
     next();
   } catch (error) {
     console.error('Error checking edit permission:', error);
@@ -58,8 +63,7 @@ router.get('/list-impedance', authenticateToken, async (req, res) => {
   try {
     connection = await database.getConnection();
     const whereCondition = `(IS_DELETED = 0 OR IS_DELETED IS NULL)
-  AND (IMP_1 IS NULL OR (IMP_1 LIKE '%-0000' AND IMP_1 NOT LIKE '%VPW%'))
-`;
+  AND (IMP_1 IS NULL OR (IMP_1 LIKE '%-0000' AND IMP_1 NOT LIKE '%VPW%'))`;
 
     // Lấy tổng số bản ghi với điều kiện lọc
     const countResult = await connection.execute(
@@ -148,7 +152,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
     let placeholders = [':imp_id'];
 
     // Process all possible impedance fields
-    for (let i = 1; i <= 138; i++) {
+    for (let i = 1; i <= 136; i++) {
       const reqField = `imp_${i}`;
       const dbField = `IMP_${i}`;
 
@@ -193,7 +197,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
        IMP_108, IMP_109, IMP_110, IMP_111, IMP_112, IMP_113, IMP_114, IMP_115,
        IMP_116, IMP_117, IMP_118, IMP_119, IMP_120, IMP_121, IMP_122,
        IMP_123, IMP_124, IMP_125, IMP_126, IMP_127, IMP_128, IMP_129, IMP_130,
-       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136, IMP_137, IMP_138,
+       IMP_131, IMP_132, IMP_133, IMP_134, IMP_135, IMP_136, IMP_137,
        NOTE as note
        FROM impedances 
        WHERE IMP_ID = :imp_id`,
@@ -207,7 +211,7 @@ router.post('/create-impedance', authenticateToken, checkEditPermission, async (
 
     // Add lowercase versions for compatibility
     const responseData = newRecord.rows[0];
-    for (let i = 1; i <= 138; i++) {
+    for (let i = 1; i <= 136; i++) {
       const upperField = `IMP_${i}`;
       const lowerField = `imp_${i}`;
       if (responseData[upperField]) {
@@ -389,7 +393,7 @@ router.put('/update-impedance/:impId', authenticateToken, checkEditPermission, a
        IMP_112, IMP_113, IMP_114, IMP_115, IMP_116, IMP_117, IMP_118,
        IMP_119, IMP_120, IMP_121, IMP_122, IMP_123, IMP_124, IMP_125,
        IMP_126, IMP_127, IMP_128, IMP_129, IMP_130, IMP_131, IMP_132,
-       IMP_133, IMP_134, IMP_135, IMP_136, IMP_137, IMP_138,
+       IMP_133, IMP_134, IMP_135, IMP_136, IMP_137,
        NOTE AS note
        FROM impedances
        WHERE IMP_ID = :imp_id`,
@@ -588,12 +592,12 @@ router.post('/import-impedance', authenticateToken, checkEditPermission, async (
             placeholders.push(`:${key.toLowerCase()}`);
             continue;
           }
-          const needsFormatting = (
-            ((i >= 52 && i <= 121) &&
-              ![77, 90, 97].includes(i) &&
-              i !== 58) ||
-            (i >= 122 && i <= 135 && ![126, 129, 131].includes(i))
-          );
+        const needsFormatting = (
+          ((i >= 52 && i <= 121) &&
+            ![77, 90, 97].includes(i) &&
+            i !== 58) ||
+          (i >= 122 && i <= 135 && ![126, 129, 131].includes(i))
+        );
           if (needsFormatting) {
             if (typeof value === 'number') {
               if (Number.isFinite(value) && !isNaN(value)) {

@@ -38,6 +38,23 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
     }
   };
 
+  // ✅ Helper function để format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('vi-VN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return 'N/A';
+    }
+  };
+
   const recordsHTML = createdRecords.map((record, index) => `
         <tr>
             <td style="border: 1px solid #ddd; padding: 8px;">${record.vendor || 'N/A'}</td>
@@ -67,7 +84,7 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Ngày yêu cầu:</td>
-                        <td>${materialData.request_date ? new Date(materialData.request_date).toLocaleDateString('vi-VN') : 'N/A'}</td>
+                        <td>${formatDate(materialData.request_date)}</td>
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Trạng thái:</td>
@@ -105,6 +122,15 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
                     </tbody>
                 </table>
             </div>
+            
+            <div style="margin-top: 20px; text-align: center;">
+                <a href="http://192.84.100.114:4000/material-core"
+                   style="display: inline-block; margin: 5px;
+                          background: #1890ff; color: #fff; text-decoration: none;
+                          padding: 8px 14px; border-radius: 4px; font-weight: bold; font-size: 13px;">
+                  Xem chi tiết 
+                </a>
+            </div>
 
             <div style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
                 <p style="margin: 0; font-size: 14px; color: #6c757d;">
@@ -115,10 +141,8 @@ function generateCreateMaterialEmailHTML(materialData, createdRecords) {
         </div>
     `;
 }
-
 // Hàm tạo nội dung HTML cho email cập nhật trạng thái
 function generateStatusUpdateEmailHTML(materialId, oldStatus, newStatus, updatedBy, materialInfo = {}) {
-  // ✅ Xác định tiêu đề và icon dựa trên trạng thái mới
   const getStatusInfo = (status) => {
     switch(status) {
       case 'Pending':
@@ -149,6 +173,19 @@ function generateStatusUpdateEmailHTML(materialId, oldStatus, newStatus, updated
   };
 
   const statusInfo = getStatusInfo(newStatus);
+  
+  // ✅ FIX: Format thời gian chính xác theo múi giờ Việt Nam
+  
+const formatDateTime = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
 
   return `
         <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
@@ -177,7 +214,7 @@ function generateStatusUpdateEmailHTML(materialId, oldStatus, newStatus, updated
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Thời gian:</td>
-                        <td>${new Date().toLocaleString('vi-VN')}</td>
+                        <td>${formatDateTime(new Date())}</td>
                     </tr>
                 </table>
             </div>
@@ -220,6 +257,16 @@ function generateStatusUpdateEmailHTML(materialId, oldStatus, newStatus, updated
 
 // Hàm tạo nội dung HTML cho email thông báo thay đổi dữ liệu material đã approve
 function generateMaterialChangeEmailHTML(materialId, changes, updatedBy, materialInfo = {}) {
+     const formatDateTime = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
   const changesHTML = changes.map(change => `
         <tr>
             <td style="border: 1px solid #ddd; padding: 8px; font-weight: bold; background-color: #f8f9fa;">${change.field}</td>
@@ -259,7 +306,7 @@ function generateMaterialChangeEmailHTML(materialId, changes, updatedBy, materia
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Thời gian thay đổi:</td>
-                        <td>${new Date().toLocaleString('vi-VN')}</td>
+                        <td>${formatDateTime(new Date())}</td>
                     </tr>
                     <tr>
                         <td style="padding: 5px 0; font-weight: bold;">Số thay đổi:</td>
@@ -336,9 +383,52 @@ function generateMaterialChangeEmailHTML(materialId, changes, updatedBy, materia
     `;
 }
 
+function generateMaterialDeleteEmailHTML(deletedBy, materialInfo = {}) {
+     const formatDateTime = (date) => {
+    const d = new Date(date);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    const seconds = String(d.getSeconds()).padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  };
+    return `
+        <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+            <h2 style="color: #dc3545; border-bottom: 2px solid #dc3545; padding-bottom: 10px;">
+                🗑️ Yêu cầu xóa vật liệu 
+            </h2>
+            
+            <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                <h3 style="color: #333; margin-top: 0;">Thông tin xóa vật liệu:</h3>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <tr>
+                        <td style="padding: 5px 0; font-weight: bold;">Vendor:</td>
+                        <td>${materialInfo.VENDOR || 'N/A'}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px 0; font-weight: bold;">Family:</td>
+                        <td>${materialInfo.FAMILY || 'N/A'}</td>
+                        </tr>
+                        <tr>
+                        <td style="padding: 5px 0; font-weight: bold;">Cập nhật bởi:</td>
+                        <td>${deletedBy}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px 0; font-weight: bold;">Thời gian xóa:</td>
+                        <td>${formatDateTime(new Date())}</td>
+                    </tr>
+                </table>
+            </div>`;
+        
+}
+
 module.exports = {
   sendMailMaterialCore,
   generateCreateMaterialEmailHTML,
   generateStatusUpdateEmailHTML,
-  generateMaterialChangeEmailHTML
+  generateMaterialChangeEmailHTML,
+  generateMaterialDeleteEmailHTML
 };
